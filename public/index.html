@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesa de Câmbio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3E%3Crect width='30' height='30' rx='7' fill='%2314110D'/%3E%3Cpath d='M8 12.5H20M20 12.5L16.5 9M20 12.5L16.5 16' stroke='%23E8A33D' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M22 18H10M10 18L13.5 14.5M10 18L13.5 21.5' stroke='%23F3E9D6' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F3F7F0;
+    --paper-2:#FFFFFF;
+    --ink:#1E2B22;
+    --line:#CBD9CE;
+    --rule:#BFE0C7;
+    --muted:#5E7268;
+    --amber:#B9781E;
+    --amber-soft:#F3E3C0;
+    --amber-ink:#5A3C0C;
+    --buy:#2F7A4F;
+    --buy-soft:#DCEEE0;
+    --sell:#A8432B;
+    --sell-soft:#F3DED4;
+    --shadow: 0 1px 2px rgba(30,43,34,.06), 0 4px 14px rgba(30,43,34,.06);
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#14110D;
+      --paper-2:#1E1912;
+      --ink:#F3E9D6;
+      --line:#3A3121;
+      --rule:#332A19;
+      --muted:#A99A7C;
+      --amber:#E8A33D;
+      --amber-soft:#3A2C13;
+      --amber-ink:#F4D9A6;
+      --buy:#5FB783;
+      --buy-soft:#1B3126;
+      --sell:#E08361;
+      --sell-soft:#3A2018;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#14110D;
+    --paper-2:#1E1912;
+    --ink:#F3E9D6;
+    --line:#3A3121;
+    --rule:#332A19;
+    --muted:#A99A7C;
+    --amber:#E8A33D;
+    --amber-soft:#3A2C13;
+    --amber-ink:#F4D9A6;
+    --buy:#5FB783;
+    --buy-soft:#1B3126;
+    --sell:#E08361;
+    --sell-soft:#3A2018;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box;}
+  html,body{ height:auto; }
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"IBM Plex Sans", system-ui, sans-serif;
+    font-size:15px;
+    line-height:1.45;
+  }
+  .num, .mono{
+    font-family:"IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  h1,h2,h3{ text-wrap:balance; margin:0; }
+  button{ font-family:inherit; }
+  ::selection{ background:var(--amber-soft); }
+
+  .shell{
+    max-width:1080px;
+    margin:0 auto;
+    padding:20px 20px 64px;
+  }
+
+  header.top{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    padding-bottom:16px;
+    margin-bottom:20px;
+    border-bottom:2px solid var(--line);
+  }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .brand svg{ flex:none; }
+  .brand-text h1{ font-size:19px; font-weight:700; letter-spacing:.01em; }
+  .brand-text p{
+    margin:2px 0 0;
+    font-size:12px;
+    color:var(--muted);
+    letter-spacing:.03em;
+    text-transform:uppercase;
+  }
+  .conn-badge{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-size:12px;
+    color:var(--muted);
+    padding:5px 10px;
+    border:1px solid var(--line);
+    border-radius:999px;
+    background:var(--paper-2);
+  }
+  .conn-dot{ width:7px;height:7px;border-radius:50%; background:var(--buy); box-shadow:0 0 0 3px var(--buy-soft); }
+  .conn-dot.off{ background:var(--sell); box-shadow:0 0 0 3px var(--sell-soft); }
+  .conn-dot.wait{ background:var(--amber); box-shadow:0 0 0 3px var(--amber-soft); }
+
+  section{ margin-bottom:28px; }
+  .section-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:12px;
+    flex-wrap:wrap;
+  }
+  .section-head h2{
+    font-size:13px;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    color:var(--muted);
+    font-weight:600;
+  }
+  .date-stepper{ display:flex; align-items:center; gap:6px; }
+  .date-stepper button{
+    width:28px;height:28px;
+    border-radius:7px;
+    border:1px solid var(--line);
+    background:var(--paper-2);
+    color:var(--ink);
+    cursor:pointer;
+    font-size:14px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .date-stepper button:hover{ border-color:var(--amber); }
+  .date-stepper input[type="date"]{
+    font-family:inherit;
+    font-size:13px;
+    border:1px solid var(--line);
+    background:var(--paper-2);
+    color:var(--ink);
+    border-radius:7px;
+    padding:5px 8px;
+  }
+  .date-stepper .today-btn{
+    width:auto; padding:0 10px;
+    font-size:12px; font-weight:600;
+    color:var(--amber-ink);
+    background:var(--amber-soft);
+    border-color:transparent;
+  }
+
+  .tiles{
+    display:flex; gap:12px;
+    overflow-x:auto;
+    padding-bottom:4px;
+    scroll-snap-type:x proximity;
+  }
+  .tile{
+    flex:0 0 auto;
+    scroll-snap-align:start;
+    min-width:180px;
+    background:var(--paper-2);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:14px 16px;
+    box-shadow:var(--shadow);
+  }
+  .tile .tile-name{
+    font-size:12px; font-weight:600; color:var(--muted);
+    text-transform:uppercase; letter-spacing:.04em;
+    margin-bottom:8px;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .tile .tile-brl{ font-size:20px; font-weight:600; }
+  .tile .tile-row{ display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-top:6px; }
+  .tile.grand{ background:var(--ink); color:var(--paper); border-color:var(--ink); }
+  .tile.grand .tile-name{ color:var(--amber); }
+  .tile.grand .tile-row{ color:var(--paper); opacity:.7; }
+  .empty-note{
+    font-size:13px; color:var(--muted);
+    padding:14px 16px;
+    background:var(--paper-2);
+    border:1px dashed var(--line);
+    border-radius:var(--radius);
+  }
+
+  .workspace{ display:grid; grid-template-columns:240px 1fr; gap:18px; align-items:start; }
+  @media (max-width:760px){ .workspace{ grid-template-columns:1fr; } }
+
+  .rail{ background:var(--paper-2); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; }
+  .rail-list{ max-height:420px; overflow-y:auto; }
+  .client-row{
+    width:100%; text-align:left; background:none; border:none;
+    border-left:3px solid transparent; border-bottom:1px solid var(--rule);
+    padding:10px 14px; cursor:pointer; color:var(--ink);
+    display:flex; flex-direction:column; gap:2px;
+  }
+  .client-row:hover{ background:var(--amber-soft); }
+  .client-row.active{ border-left-color:var(--amber); background:var(--amber-soft); }
+  .client-row .cn{ font-weight:600; font-size:14px; }
+  .client-row .cr{ font-size:11.5px; color:var(--muted); }
+  .rail-add{ padding:10px; border-top:1px solid var(--line); display:flex; gap:6px; }
+  .rail-add input{
+    flex:1; min-width:0; font-family:inherit; font-size:13px;
+    padding:7px 9px; border:1px solid var(--line); border-radius:7px;
+    background:var(--paper); color:var(--ink);
+  }
+  .rail-add button{
+    border:none; background:var(--ink); color:var(--paper);
+    border-radius:7px; padding:0 12px; font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .rail-empty{ padding:16px 14px; font-size:13px; color:var(--muted); }
+
+  .workpane{
+    background:var(--paper-2); border:1px solid var(--line);
+    border-radius:var(--radius); box-shadow:var(--shadow);
+    padding:18px; min-height:420px;
+  }
+  .no-client{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; gap:6px; min-height:380px; color:var(--muted); font-size:14px;
+  }
+
+  .client-head{
+    display:flex; justify-content:space-between; align-items:flex-start; gap:14px;
+    padding-bottom:14px; margin-bottom:16px; border-bottom:1px solid var(--line); flex-wrap:wrap;
+  }
+  .client-head h3{ font-size:18px; font-weight:700; }
+  .client-head .sub{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .client-head .del-client{
+    border:1px solid var(--line); background:var(--paper); color:var(--muted);
+    font-size:11.5px; padding:5px 9px; border-radius:7px; cursor:pointer;
+  }
+  .client-head .del-client:hover{ color:var(--sell); border-color:var(--sell); }
+  .rate-readout{ text-align:right; }
+  .rate-readout .rl{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  .rate-readout .rv{ font-size:26px; font-weight:700; color:var(--amber-ink); }
+  @media (prefers-color-scheme:dark){ .rate-readout .rv{ color:var(--amber); } }
+  :root[data-theme="dark"] .rate-readout .rv{ color:var(--amber); }
+
+  form.tx-form{
+    display:grid; grid-template-columns:repeat(6,1fr); gap:10px; align-items:end;
+    margin-bottom:20px; padding:14px; background:var(--paper);
+    border:1px solid var(--line); border-radius:var(--radius);
+  }
+  @media (max-width:640px){ form.tx-form{ grid-template-columns:1fr 1fr; } }
+  .field{ display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .field label{ font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .field input, .field select{
+    font-family:inherit; font-size:13.5px; padding:8px 9px;
+    border:1px solid var(--line); border-radius:7px;
+    background:var(--paper-2); color:var(--ink); width:100%;
+  }
+  .field input.num{ font-family:"IBM Plex Mono",monospace; }
+  .seg{ display:flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; }
+  .seg button{
+    flex:1; border:none; background:var(--paper-2); color:var(--muted);
+    font-size:12.5px; font-weight:600; padding:8px 4px; cursor:pointer;
+  }
+  .seg button.on.compra{ background:var(--buy-soft); color:var(--buy); }
+  .seg button.on.venda{ background:var(--sell-soft); color:var(--sell); }
+  .brl-preview{ display:flex; flex-direction:column; gap:4px; }
+  .brl-preview .pv{
+    font-family:"IBM Plex Mono",monospace; font-size:14px; font-weight:600;
+    padding:8px 9px; background:var(--paper-2); border:1px dashed var(--line);
+    border-radius:7px; color:var(--muted);
+  }
+  .submit-btn{
+    grid-column:span 6; border:none; background:var(--ink); color:var(--paper);
+    font-weight:700; font-size:13.5px; padding:10px; border-radius:7px; cursor:pointer; letter-spacing:.02em;
+  }
+  @media (max-width:640px){ .submit-btn{ grid-column:span 2; } }
+  .submit-btn:hover{ opacity:.92; }
+  .submit-btn:disabled{ opacity:.6; cursor:default; }
+
+  .ledger-wrap{ overflow-x:auto; }
+  table.ledger{ width:100%; border-collapse:collapse; font-size:13px; }
+  table.ledger th{
+    text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--muted); font-weight:600; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap;
+  }
+  table.ledger td{ padding:8px 8px; border-bottom:1px solid var(--rule); vertical-align:middle; white-space:nowrap; }
+  table.ledger td.obs{ white-space:normal; color:var(--muted); font-size:12.5px; }
+  table.ledger tr:last-child td{ border-bottom:none; }
+  .pill{ display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; }
+  .pill.compra{ background:var(--buy-soft); color:var(--buy); }
+  .pill.venda{ background:var(--sell-soft); color:var(--sell); }
+  .del-btn{ border:none; background:none; color:var(--muted); cursor:pointer; font-size:14px; padding:2px 6px; border-radius:6px; }
+  .del-btn:hover{ color:var(--sell); background:var(--sell-soft); }
+  .ledger-empty{ padding:24px 8px; text-align:center; color:var(--muted); font-size:13px; }
+
+  .banner{
+    font-size:13px; padding:10px 14px; border-radius:8px; margin-bottom:16px;
+    border:1px solid var(--line); background:var(--amber-soft); color:var(--amber-ink);
+  }
+  .banner.error{ background:var(--sell-soft); color:var(--sell); border-color:transparent; }
+
+  footer.foot{
+    margin-top:30px; padding-top:14px; border-top:1px solid var(--line);
+    font-size:11.5px; color:var(--muted); text-align:center;
+  }
+
+  @media (prefers-reduced-motion:no-preference){
+    .tile, .workpane, .rail{ animation:rise .35s ease both; }
+  }
+  @keyframes rise{ from{ opacity:0; transform:translateY(6px);} to{ opacity:1; transform:none;} }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="0.5" y="0.5" width="29" height="29" rx="7" fill="var(--ink)"/>
+        <path d="M8 12.5H20M20 12.5L16.5 9M20 12.5L16.5 16" stroke="var(--amber)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M22 18H10M10 18L13.5 14.5M10 18L13.5 21.5" stroke="var(--paper)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="brand-text">
+        <h1>Mesa de Câmbio</h1>
+        <p>USD · BRL</p>
+      </div>
+    </div>
+    <div class="conn-badge" id="connBadge">
+      <span class="conn-dot wait" id="connDot"></span>
+      <span id="connText">Conectando…</span>
+    </div>
+  </header>
+
+  <div id="bannerHost"></div>
+
+  <section id="summarySection">
+    <div class="section-head">
+      <h2>Resumo do dia</h2>
+      <div class="date-stepper">
+        <button type="button" id="dayPrev" aria-label="Dia anterior">‹</button>
+        <input type="date" id="dayInput">
+        <button type="button" id="dayNext" aria-label="Próximo dia">›</button>
+        <button type="button" id="dayToday" class="today-btn">Hoje</button>
+      </div>
+    </div>
+    <div id="tiles" class="tiles"></div>
+  </section>
+
+  <section>
+    <div class="section-head"><h2>Clientes &amp; lançamentos</h2></div>
+    <div class="workspace">
+      <div class="rail">
+        <div class="rail-list" id="railList"></div>
+        <form class="rail-add" id="addClientForm">
+          <input type="text" id="newClientName" placeholder="Nome do novo cliente" autocomplete="off">
+          <button type="submit">Adicionar</button>
+        </form>
+      </div>
+      <div class="workpane" id="workpane">
+        <div class="no-client">
+          <div>Selecione um cliente à esquerda,<br>ou adicione o primeiro para começar.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">Os dados ficam salvos no servidor e sincronizam entre todos os aparelhos com este link.</footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var clients = [];
+  var transactions = [];
+  var selectedClientId = null;
+  var summaryDate = todayStr();
+  var POLL_MS = 8000;
+
+  function todayStr(){
+    var d = new Date();
+    var m = String(d.getMonth()+1).padStart(2,'0');
+    var day = String(d.getDate()).padStart(2,'0');
+    return d.getFullYear()+"-"+m+"-"+day;
+  }
+  function fmtDateBR(iso){
+    var p = iso.split("-");
+    return p[2]+"/"+p[1]+"/"+p[0];
+  }
+  function fmtBRL(n){
+    return (n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  }
+  function fmtUSD(n){
+    return "US$ "+(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  }
+  function fmtRate(n){
+    if(!isFinite(n)) return "—";
+    return n.toLocaleString('pt-BR',{minimumFractionDigits:4,maximumFractionDigits:4});
+  }
+  function esc(s){
+    return String(s==null?"":s).replace(/[&<>"']/g,function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+
+  function setConn(state, text){
+    var dot = document.getElementById('connDot');
+    var t = document.getElementById('connText');
+    dot.className = 'conn-dot ' + (state==='ok'?'':state==='off'?'off':'wait');
+    t.textContent = text;
+  }
+
+  function showBanner(msg, isError){
+    var host = document.getElementById('bannerHost');
+    var el = document.createElement('div');
+    el.className = 'banner' + (isError ? ' error' : '');
+    el.textContent = msg;
+    host.innerHTML = '';
+    host.appendChild(el);
+    setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 6000);
+  }
+
+  // ---------------- API ----------------
+
+  function api(path, opts){
+    opts = opts || {};
+    opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
+    return fetch('/api'+path, opts).then(function(r){
+      if(!r.ok) return r.json().catch(function(){return {};}).then(function(body){
+        throw new Error(body.error || ('HTTP '+r.status));
+      });
+      return r.json();
+    });
+  }
+
+  function loadAll(){
+    return Promise.all([
+      api('/clients'),
+      api('/transactions')
+    ]).then(function(res){
+      clients = res[0];
+      transactions = res[1];
+      if(!selectedClientId && clients.length){ selectedClientId = clients[0].id; }
+      if(selectedClientId && !clients.some(function(c){return c.id===selectedClientId;})){
+        selectedClientId = clients.length ? clients[0].id : null;
+      }
+      setConn('ok','Sincronizado');
+      render();
+    }).catch(function(err){
+      setConn('off','Sem conexão com o servidor');
+    });
+  }
+
+  function addTransaction(clientId, clientName, date, tipo, usd, taxa, obs){
+    return api('/transactions', {
+      method:'POST',
+      body: JSON.stringify({clientId:clientId, clientName:clientName, date:date, tipo:tipo, usd:usd, taxa:taxa, obs:obs})
+    }).then(loadAll).catch(function(){
+      showBanner('Não foi possível salvar o lançamento. Tente novamente.', true);
+    });
+  }
+  function deleteTransaction(id){
+    return api('/transactions/'+id, {method:'DELETE'}).then(loadAll).catch(function(){
+      showBanner('Não foi possível excluir o lançamento.', true);
+    });
+  }
+  function addClient(name){
+    return api('/clients', {method:'POST', body: JSON.stringify({name:name})}).then(function(c){
+      selectedClientId = c.id;
+      return loadAll();
+    }).catch(function(){
+      showBanner('Não foi possível adicionar o cliente.', true);
+    });
+  }
+  function deleteClient(id){
+    return api('/clients/'+id, {method:'DELETE'}).then(function(){
+      if(selectedClientId===id) selectedClientId = null;
+      return loadAll();
+    }).catch(function(){
+      showBanner('Não foi possível remover o cliente.', true);
+    });
+  }
+
+  // ---------------- rendering ----------------
+
+  function render(){
+    renderTiles();
+    renderRail();
+    renderWorkpane();
+  }
+
+  function renderTiles(){
+    var host = document.getElementById('tiles');
+    var dayTx = transactions.filter(function(t){ return t.date === summaryDate; });
+    if(dayTx.length === 0){
+      host.innerHTML = '<div class="empty-note">Nenhuma transação em ' + fmtDateBR(summaryDate) + '.</div>';
+      return;
+    }
+    var byClient = {};
+    dayTx.forEach(function(t){
+      var k = t.clientId;
+      if(!byClient[k]) byClient[k] = { name: t.clientName, usd:0, brl:0 };
+      byClient[k].usd += t.usd;
+      byClient[k].brl += t.brl;
+    });
+    var names = Object.keys(byClient).sort(function(a,b){
+      return byClient[a].name.localeCompare(byClient[b].name,'pt-BR');
+    });
+    var grandUsd = 0, grandBrl = 0;
+    var html = names.map(function(id){
+      var c = byClient[id];
+      grandUsd += c.usd; grandBrl += c.brl;
+      var rate = c.usd ? c.brl/c.usd : 0;
+      return '<div class="tile">' +
+        '<div class="tile-name">' + esc(c.name) + '</div>' +
+        '<div class="tile-brl num">' + fmtBRL(c.brl) + '</div>' +
+        '<div class="tile-row"><span>' + fmtUSD(c.usd) + '</span><span class="num">' + fmtRate(rate) + '</span></div>' +
+      '</div>';
+    }).join('');
+    var grandRate = grandUsd ? grandBrl/grandUsd : 0;
+    html += '<div class="tile grand">' +
+      '<div class="tile-name">Total geral</div>' +
+      '<div class="tile-brl num">' + fmtBRL(grandBrl) + '</div>' +
+      '<div class="tile-row"><span>' + fmtUSD(grandUsd) + '</span><span class="num">' + fmtRate(grandRate) + '</span></div>' +
+    '</div>';
+    host.innerHTML = html;
+  }
+
+  function clientStats(clientId){
+    var list = transactions.filter(function(t){ return t.clientId === clientId; });
+    var usd = 0, brl = 0;
+    list.forEach(function(t){ usd += t.usd; brl += t.brl; });
+    return { list: list, usd: usd, brl: brl, rate: usd ? brl/usd : NaN };
+  }
+
+  function renderRail(){
+    var host = document.getElementById('railList');
+    if(clients.length === 0){
+      host.innerHTML = '<div class="rail-empty">Nenhum cliente ainda. Adicione o primeiro abaixo.</div>';
+      return;
+    }
+    var sorted = clients.slice().sort(function(a,b){ return a.name.localeCompare(b.name,'pt-BR'); });
+    host.innerHTML = sorted.map(function(c){
+      var s = clientStats(c.id);
+      var rateLabel = s.list.length ? fmtRate(s.rate) : "sem lançamentos";
+      return '<button type="button" class="client-row ' + (c.id===selectedClientId?'active':'') + '" data-id="' + c.id + '">' +
+        '<span class="cn">' + esc(c.name) + '</span>' +
+        '<span class="cr num">' + rateLabel + '</span>' +
+      '</button>';
+    }).join('');
+    Array.prototype.forEach.call(host.querySelectorAll('.client-row'), function(btn){
+      btn.addEventListener('click', function(){
+        selectedClientId = btn.getAttribute('data-id');
+        render();
+      });
+    });
+  }
+
+  function renderWorkpane(){
+    var host = document.getElementById('workpane');
+    var client = clients.find(function(c){ return c.id === selectedClientId; });
+    if(!client){
+      host.innerHTML = '<div class="no-client"><div>Selecione um cliente à esquerda,<br>ou adicione o primeiro para começar.</div></div>';
+      return;
+    }
+    var s = clientStats(client.id);
+    var rows = s.list.slice().sort(function(a,b){ return (b.createdAt||'').localeCompare(a.createdAt||''); });
+
+    var rowsHtml = rows.length ? rows.map(function(t){
+      return '<tr data-id="' + t.id + '">' +
+        '<td class="num">' + fmtDateBR(t.date) + '</td>' +
+        '<td><span class="pill ' + (t.tipo==='Compra'?'compra':'venda') + '">' + t.tipo + '</span></td>' +
+        '<td class="num">' + fmtUSD(t.usd) + '</td>' +
+        '<td class="num">' + fmtRate(t.taxa) + '</td>' +
+        '<td class="num">' + fmtBRL(t.brl) + '</td>' +
+        '<td class="obs">' + esc(t.obs||'') + '</td>' +
+        '<td><button type="button" class="del-btn" data-del="' + t.id + '" title="Excluir lançamento">✕</button></td>' +
+      '</tr>';
+    }).join('') : '';
+
+    host.innerHTML =
+      '<div class="client-head">' +
+        '<div><h3>' + esc(client.name) + '</h3><div class="sub">' + s.list.length + ' lançamento' + (s.list.length===1?'':'s') + ' · ' + fmtUSD(s.usd) + '</div></div>' +
+        '<div class="rate-readout"><div class="rl">Taxa média</div><div class="rv num">' + (s.list.length? fmtRate(s.rate) : '—') + '</div></div>' +
+      '</div>' +
+
+      '<form class="tx-form" id="txForm">' +
+        '<div class="field"><label for="txDate">Data</label><input type="date" id="txDate" value="' + summaryDate + '" required></div>' +
+        '<div class="field"><label>Tipo</label>' +
+          '<div class="seg">' +
+            '<button type="button" class="on compra" data-tipo="Compra">Compra</button>' +
+            '<button type="button" class="venda" data-tipo="Venda">Venda</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="field"><label for="txUsd">Valor USD</label><input type="number" step="0.01" min="0" inputmode="decimal" id="txUsd" class="num" placeholder="0,00" required></div>' +
+        '<div class="field"><label for="txTaxa">Taxa (R$)</label><input type="number" step="0.0001" min="0" inputmode="decimal" id="txTaxa" class="num" placeholder="0,0000" required></div>' +
+        '<div class="field"><label for="txObs">Obs</label><input type="text" id="txObs" placeholder="opcional"></div>' +
+        '<div class="field brl-preview"><label>Valor BRL</label><div class="pv num" id="txPreview">R$ 0,00</div></div>' +
+        '<button type="submit" class="submit-btn">Adicionar lançamento</button>' +
+      '</form>' +
+
+      '<div class="ledger-wrap">' +
+        (rows.length ?
+          '<table class="ledger"><thead><tr><th>Data</th><th>Tipo</th><th>USD</th><th>Taxa</th><th>BRL</th><th>Obs</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table>'
+          : '<div class="ledger-empty">Nenhum lançamento ainda para ' + esc(client.name) + '.</div>') +
+      '</div>';
+
+    var delClientBtn = document.createElement('button');
+    delClientBtn.type = 'button';
+    delClientBtn.className = 'del-client';
+    delClientBtn.textContent = 'Remover cliente';
+    delClientBtn.title = s.list.length ? 'Só é possível remover clientes sem lançamentos' : 'Remover cliente';
+    delClientBtn.disabled = s.list.length > 0;
+    host.querySelector('.client-head > div:first-child').appendChild(document.createElement('br'));
+    host.querySelector('.client-head').appendChild(delClientBtn);
+    delClientBtn.addEventListener('click', function(){
+      if(confirm('Remover o cliente "' + client.name + '"?')) deleteClient(client.id);
+    });
+
+    var tipoState = 'Compra';
+    var segBtns = host.querySelectorAll('.seg button');
+    Array.prototype.forEach.call(segBtns, function(b){
+      b.addEventListener('click', function(){
+        tipoState = b.getAttribute('data-tipo');
+        Array.prototype.forEach.call(segBtns, function(x){ x.classList.toggle('on', x===b); });
+      });
+    });
+
+    var usdEl = host.querySelector('#txUsd');
+    var taxaEl = host.querySelector('#txTaxa');
+    var previewEl = host.querySelector('#txPreview');
+    function updatePreview(){
+      var u = parseFloat(usdEl.value) || 0;
+      var t = parseFloat(taxaEl.value) || 0;
+      previewEl.textContent = fmtBRL(u*t);
+    }
+    usdEl.addEventListener('input', updatePreview);
+    taxaEl.addEventListener('input', updatePreview);
+
+    var formEl = host.querySelector('#txForm');
+    formEl.addEventListener('submit', function(ev){
+      ev.preventDefault();
+      var date = host.querySelector('#txDate').value || summaryDate;
+      var usd = parseFloat(usdEl.value);
+      var taxa = parseFloat(taxaEl.value);
+      var obs = host.querySelector('#txObs').value.trim();
+      if(!(usd > 0) || !(taxa > 0)) return;
+      var submitBtn = formEl.querySelector('.submit-btn');
+      submitBtn.disabled = true;
+      addTransaction(client.id, client.name, date, tipoState, usd, taxa, obs).then(function(){
+        submitBtn.disabled = false;
+      });
+    });
+
+    Array.prototype.forEach.call(host.querySelectorAll('[data-del]'), function(btn){
+      btn.addEventListener('click', function(){
+        if(confirm('Excluir este lançamento?')) deleteTransaction(btn.getAttribute('data-del'));
+      });
+    });
+  }
+
+  // ---------------- wiring ----------------
+
+  document.getElementById('addClientForm').addEventListener('submit', function(ev){
+    ev.preventDefault();
+    var input = document.getElementById('newClientName');
+    var name = input.value.trim();
+    if(!name) return;
+    addClient(name);
+    input.value = '';
+  });
+
+  document.getElementById('dayInput').value = summaryDate;
+  document.getElementById('dayInput').addEventListener('change', function(){
+    summaryDate = this.value || todayStr();
+    renderTiles();
+  });
+  document.getElementById('dayPrev').addEventListener('click', function(){ shiftDay(-1); });
+  document.getElementById('dayNext').addEventListener('click', function(){ shiftDay(1); });
+  document.getElementById('dayToday').addEventListener('click', function(){
+    summaryDate = todayStr();
+    document.getElementById('dayInput').value = summaryDate;
+    renderTiles();
+  });
+  function shiftDay(delta){
+    var d = new Date(summaryDate + 'T00:00:00');
+    d.setDate(d.getDate()+delta);
+    var m = String(d.getMonth()+1).padStart(2,'0');
+    var day = String(d.getDate()).padStart(2,'0');
+    summaryDate = d.getFullYear()+"-"+m+"-"+day;
+    document.getElementById('dayInput').value = summaryDate;
+    renderTiles();
+  }
+
+  // ---------------- boot ----------------
+
+  render();
+  setConn('wait','Conectando…');
+  loadAll();
+  setInterval(loadAll, POLL_MS);
+
+})();
+</script>
+</body>
+</html>

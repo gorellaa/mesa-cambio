@@ -1,0 +1,76 @@
+const express = require('express');
+const path = require('path');
+const db = require('./db');
+
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+app.get('/api/clients', async (req, res) => {
+  await db.ready;
+  res.json(await db.listClients());
+});
+
+app.post('/api/clients', async (req, res) => {
+  await db.ready;
+  const name = (req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  res.json(await db.addClient(name));
+});
+
+app.delete('/api/clients/:id', async (req, res) => {
+  await db.ready;
+  await db.deleteClient(req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/transactions', async (req, res) => {
+  await db.ready;
+  res.json(await db.listTransactions());
+});
+
+app.post('/api/transactions', async (req, res) => {
+  await db.ready;
+  const { clientId, clientName, date, tipo, usd, taxa, obs } = req.body;
+  const usdNum = Number(usd);
+  const taxaNum = Number(taxa);
+  if (
+    !clientId ||
+    !clientName ||
+    !date ||
+    (tipo !== 'Compra' && tipo !== 'Venda') ||
+    !(usdNum > 0) ||
+    !(taxaNum > 0)
+  ) {
+    return res.status(400).json({ error: 'invalid transaction' });
+  }
+  const brl = Math.round(usdNum * taxaNum * 100) / 100;
+  const tx = await db.addTransaction({
+    clientId,
+    clientName,
+    date,
+    tipo,
+    usd: usdNum,
+    taxa: taxaNum,
+    brl,
+    obs: (obs || '').slice(0, 500),
+  });
+  res.json(tx);
+});
+
+app.delete('/api/transactions/:id', async (req, res) => {
+  await db.ready;
+  await db.deleteTransaction(req.params.id);
+  res.json({ ok: true });
+});
+
+app.get(/^(?!\/api\/).*/, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log('Mesa de Câmbio rodando na porta ' + PORT);
+});
