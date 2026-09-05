@@ -1,8 +1,33 @@
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const db = require('./db');
 
 const app = express();
+
+const APP_USER = process.env.APP_USER || 'admin';
+const APP_PASSWORD = process.env.APP_PASSWORD || 'admin123';
+
+function safeEqual(a, b) {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+app.use((req, res, next) => {
+  const header = req.headers.authorization || '';
+  const [scheme, encoded] = header.split(' ');
+  if (scheme === 'Basic' && encoded) {
+    const [user, pass] = Buffer.from(encoded, 'base64').toString().split(':');
+    if (user && pass && safeEqual(user, APP_USER) && safeEqual(pass, APP_PASSWORD)) {
+      return next();
+    }
+  }
+  res.set('WWW-Authenticate', 'Basic realm="Mesa de Câmbio"');
+  res.status(401).send('Autenticação necessária.');
+});
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
