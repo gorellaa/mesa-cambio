@@ -21,6 +21,17 @@ function rowToTx(r) {
     createdAt: r.created_at,
   };
 }
+function rowToPending(r) {
+  return {
+    id: r.id,
+    clientId: r.client_id,
+    clientName: r.client_name,
+    tipo: r.tipo,
+    usd: Number(r.usd),
+    obs: r.obs || '',
+    createdAt: r.created_at,
+  };
+}
 
 let impl;
 
@@ -47,6 +58,15 @@ if (DATABASE_URL) {
       usd DOUBLE PRECISION NOT NULL,
       taxa DOUBLE PRECISION NOT NULL,
       brl DOUBLE PRECISION NOT NULL,
+      obs TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS pending (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      client_name TEXT NOT NULL,
+      tipo TEXT NOT NULL,
+      usd DOUBLE PRECISION NOT NULL,
       obs TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
@@ -88,6 +108,58 @@ if (DATABASE_URL) {
     async deleteTransaction(id) {
       await pool.query('DELETE FROM transactions WHERE id = $1', [id]);
     },
+    async listPending() {
+      const r = await pool.query(
+        'SELECT * FROM pending ORDER BY created_at ASC LIMIT 2000'
+      );
+      return r.rows.map(rowToPending);
+    },
+    async addPending(p) {
+      const id = crypto.randomUUID();
+      const r = await pool.query(
+        `INSERT INTO pending (id, client_id, client_name, tipo, usd, obs)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [id, p.clientId, p.clientName, p.tipo, p.usd, p.obs || '']
+      );
+      return rowToPending(r.rows[0]);
+    },
+    async deletePending(id) {
+      await pool.query('DELETE FROM pending WHERE id = $1', [id]);
+    },
+    async closePending({ clientId, clientName, tipo, taxa, date, obs }) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const sumR = await client.query(
+          'SELECT COALESCE(SUM(usd),0) AS total FROM pending WHERE client_id = $1 AND tipo = $2',
+          [clientId, tipo]
+        );
+        const usd = Number(sumR.rows[0].total);
+        if (!(usd > 0)) {
+          await client.query('ROLLBACK');
+          return null;
+        }
+        const brl = Math.round(usd * taxa * 100) / 100;
+        const id = crypto.randomUUID();
+        const txR = await client.query(
+          `INSERT INTO transactions
+            (id, client_id, client_name, date, tipo, usd, taxa, brl, obs)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+          [id, clientId, clientName, date, tipo, usd, taxa, brl, obs || '']
+        );
+        await client.query('DELETE FROM pending WHERE client_id = $1 AND tipo = $2', [
+          clientId,
+          tipo,
+        ]);
+        await client.query('COMMIT');
+        return rowToTx(txR.rows[0]);
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
   };
 } else {
   // Local development fallback only: a JSON file next to this script.
@@ -97,9 +169,11 @@ if (DATABASE_URL) {
 
   function load() {
     try {
-      return JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      const data = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      if (!data.pending) data.pending = [];
+      return data;
     } catch (e) {
-      return { clients: [], transactions: [] };
+      return { clients: [], transactions: [], pending: [] };
     }
   }
   function save(data) {
@@ -139,6 +213,44 @@ if (DATABASE_URL) {
       const data = load();
       data.transactions = data.transactions.filter((t) => t.id !== id);
       save(data);
+    },
+    async listPending() {
+      return load().pending.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    },
+    async addPending(p) {
+      const data = load();
+      const entry = { ...p, id: crypto.randomUUID(), createdAt: new Date().toISOString() };
+      data.pending.push(entry);
+      save(data);
+      return entry;
+    },
+    async deletePending(id) {
+      const data = load();
+      data.pending = data.pending.filter((p) => p.id !== id);
+      save(data);
+    },
+    async closePending({ clientId, clientName, tipo, taxa, date, obs }) {
+      const data = load();
+      const matching = data.pending.filter((p) => p.clientId === clientId && p.tipo === tipo);
+      const usd = matching.reduce((s, p) => s + p.usd, 0);
+      if (!(usd > 0)) return null;
+      const brl = Math.round(usd * taxa * 100) / 100;
+      const tx = {
+        id: crypto.randomUUID(),
+        clientId,
+        clientName,
+        date,
+        tipo,
+        usd,
+        taxa,
+        brl,
+        obs: obs || '',
+        createdAt: new Date().toISOString(),
+      };
+      data.transactions.push(tx);
+      data.pending = data.pending.filter((p) => !(p.clientId === clientId && p.tipo === tipo));
+      save(data);
+      return tx;
     },
   };
 }

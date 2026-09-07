@@ -288,6 +288,52 @@
   .submit-btn:hover{ opacity:.92; }
   .submit-btn:disabled{ opacity:.6; cursor:default; }
 
+  .pending-box{
+    margin-bottom:20px; padding:14px; background:var(--amber-soft);
+    border:1px solid var(--amber); border-radius:var(--radius);
+  }
+  .pending-box .pb-title{ font-size:13px; font-weight:700; color:var(--amber-ink); margin-bottom:2px; }
+  :root[data-theme="dark"] .pending-box .pb-title,
+  @media (prefers-color-scheme:dark){ .pending-box .pb-title{ color:var(--amber); } }
+  .pending-box .pb-help{ font-size:11.5px; color:var(--muted); margin-bottom:10px; }
+  form.pending-add{ display:flex; gap:8px; align-items:end; flex-wrap:wrap; margin-bottom:10px; }
+  form.pending-add .seg{ width:150px; }
+  form.pending-add .field{ flex:1; min-width:120px; }
+  form.pending-add .add-btn{
+    border:none; background:var(--ink); color:var(--paper); font-weight:700;
+    font-size:13px; padding:8px 16px; border-radius:7px; cursor:pointer;
+  }
+  .pending-group{
+    background:var(--paper-2); border:1px solid var(--line); border-radius:8px;
+    padding:10px 12px; margin-top:8px;
+  }
+  .pending-group + .pending-group{ margin-top:8px; }
+  .pending-items{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+  .pending-chip{
+    display:flex; align-items:center; gap:6px;
+    font-family:"IBM Plex Mono",monospace; font-size:12px;
+    background:var(--paper); border:1px solid var(--line); border-radius:999px;
+    padding:3px 4px 3px 10px;
+  }
+  .pending-chip button{
+    border:none; background:none; color:var(--muted); cursor:pointer;
+    width:16px; height:16px; border-radius:50%; font-size:11px; line-height:1;
+  }
+  .pending-chip button:hover{ color:var(--sell); background:var(--sell-soft); }
+  .pending-total{
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size:13px; font-weight:700; margin-bottom:10px;
+  }
+  .pending-total .pt-tipo.compra{ color:var(--buy); }
+  .pending-total .pt-tipo.venda{ color:var(--sell); }
+  .pending-total .pt-val{ font-family:"IBM Plex Mono",monospace; }
+  form.pending-close{ display:flex; gap:8px; align-items:end; flex-wrap:wrap; }
+  form.pending-close .field{ min-width:110px; }
+  form.pending-close .close-btn{
+    border:none; background:var(--ink); color:var(--paper); font-weight:700;
+    font-size:13px; padding:8px 16px; border-radius:7px; cursor:pointer;
+  }
+
   .ledger-wrap{ overflow-x:auto; }
   table.ledger{ width:100%; border-collapse:collapse; font-size:13px; }
   table.ledger th{
@@ -383,6 +429,7 @@
 
   var clients = [];
   var transactions = [];
+  var pending = [];
   var selectedClientId = null;
   var summaryDate = todayStr();
   var POLL_MS = 8000;
@@ -446,10 +493,12 @@
   function loadAll(){
     return Promise.all([
       api('/clients'),
-      api('/transactions')
+      api('/transactions'),
+      api('/pending')
     ]).then(function(res){
       clients = res[0];
       transactions = res[1];
+      pending = res[2];
       if(!selectedClientId && clients.length){ selectedClientId = clients[0].id; }
       if(selectedClientId && !clients.some(function(c){return c.id===selectedClientId;})){
         selectedClientId = clients.length ? clients[0].id : null;
@@ -480,6 +529,27 @@
       return loadAll();
     }).catch(function(){
       showBanner('Não foi possível adicionar o cliente.', true);
+    });
+  }
+  function addPending(clientId, clientName, tipo, usd, obs){
+    return api('/pending', {
+      method:'POST',
+      body: JSON.stringify({clientId:clientId, clientName:clientName, tipo:tipo, usd:usd, obs:obs})
+    }).then(loadAll).catch(function(){
+      showBanner('Não foi possível adicionar o valor pendente.', true);
+    });
+  }
+  function deletePending(id){
+    return api('/pending/'+id, {method:'DELETE'}).then(loadAll).catch(function(){
+      showBanner('Não foi possível remover o valor pendente.', true);
+    });
+  }
+  function closePending(clientId, clientName, tipo, taxa, date, obs){
+    return api('/pending/close', {
+      method:'POST',
+      body: JSON.stringify({clientId:clientId, clientName:clientName, tipo:tipo, taxa:taxa, date:date, obs:obs})
+    }).then(loadAll).catch(function(){
+      showBanner('Não foi possível fechar os valores pendentes.', true);
     });
   }
   function deleteClient(id){
@@ -543,6 +613,18 @@
     return { list: list, usd: usd, brl: brl, rate: usd ? brl/usd : NaN };
   }
 
+  function clientPendingGroups(clientId){
+    var list = pending.filter(function(p){ return p.clientId === clientId; });
+    var groups = {};
+    ['Compra','Venda'].forEach(function(tipo){
+      var items = list.filter(function(p){ return p.tipo === tipo; });
+      if(items.length){
+        groups[tipo] = { items: items, total: items.reduce(function(s,p){ return s+p.usd; }, 0) };
+      }
+    });
+    return groups;
+  }
+
   function renderRail(){
     var host = document.getElementById('railList');
     if(clients.length === 0){
@@ -588,11 +670,43 @@
       '</tr>';
     }).join('') : '';
 
+    var pendingGroups = clientPendingGroups(client.id);
+    var pendingGroupsHtml = ['Compra','Venda'].map(function(tipo){
+      var g = pendingGroups[tipo];
+      if(!g) return '';
+      var itemsHtml = g.items.map(function(p){
+        return '<span class="pending-chip">' + fmtUSD(p.usd) + '<button type="button" data-pdel="' + p.id + '" title="Remover">✕</button></span>';
+      }).join('');
+      return '<div class="pending-group" data-tipo="' + tipo + '">' +
+        '<div class="pending-items">' + itemsHtml + '</div>' +
+        '<div class="pending-total"><span class="pt-tipo ' + (tipo==='Compra'?'compra':'venda') + '">' + tipo + ' pendente</span><span class="pt-val num">' + fmtUSD(g.total) + '</span></div>' +
+        '<form class="pending-close" data-tipo="' + tipo + '">' +
+          '<div class="field"><label>Taxa (R$)</label><input type="number" step="0.0001" min="0" inputmode="decimal" class="num pc-taxa" placeholder="0,0000" required></div>' +
+          '<div class="field"><label>Data</label><input type="date" class="pc-date" value="' + summaryDate + '" required></div>' +
+          '<button type="submit" class="close-btn">Fechar ' + tipo.toLowerCase() + '</button>' +
+        '</form>' +
+      '</div>';
+    }).join('');
+
+    var pendingBoxHtml =
+      '<div class="pending-box">' +
+        '<div class="pb-title">Valores pendentes</div>' +
+        '<div class="pb-help">Some os valores conforme o cliente for mandando ao longo do dia. No final, feche com a taxa combinada.</div>' +
+        '<form class="pending-add" id="pendingAddForm">' +
+          '<div class="field"><label>Tipo</label><div class="seg"><button type="button" class="on compra" data-tipo="Compra">Compra</button><button type="button" class="venda" data-tipo="Venda">Venda</button></div></div>' +
+          '<div class="field"><label>Valor USD</label><input type="number" step="0.01" min="0" inputmode="decimal" id="pendingUsd" class="num" placeholder="0,00" required></div>' +
+          '<button type="submit" class="add-btn">Adicionar</button>' +
+        '</form>' +
+        pendingGroupsHtml +
+      '</div>';
+
     host.innerHTML =
       '<div class="client-head">' +
         '<div><h3>' + esc(client.name) + '</h3><div class="sub">' + s.list.length + ' lançamento' + (s.list.length===1?'':'s') + ' · ' + fmtUSD(s.usd) + '</div></div>' +
         '<div class="rate-readout"><div class="rl">Taxa média</div><div class="rv num">' + (s.list.length? fmtRate(s.rate) : '—') + '</div></div>' +
       '</div>' +
+
+      pendingBoxHtml +
 
       '<form class="tx-form" id="txForm">' +
         '<div class="field"><label for="txDate">Data</label><input type="date" id="txDate" value="' + summaryDate + '" required></div>' +
@@ -627,8 +741,9 @@
       if(confirm('Remover o cliente "' + client.name + '"?')) deleteClient(client.id);
     });
 
+    var formEl = host.querySelector('#txForm');
     var tipoState = 'Compra';
-    var segBtns = host.querySelectorAll('.seg button');
+    var segBtns = formEl.querySelectorAll('.seg button');
     Array.prototype.forEach.call(segBtns, function(b){
       b.addEventListener('click', function(){
         tipoState = b.getAttribute('data-tipo');
@@ -647,7 +762,6 @@
     usdEl.addEventListener('input', updatePreview);
     taxaEl.addEventListener('input', updatePreview);
 
-    var formEl = host.querySelector('#txForm');
     formEl.addEventListener('submit', function(ev){
       ev.preventDefault();
       var date = host.querySelector('#txDate').value || summaryDate;
@@ -659,6 +773,40 @@
       submitBtn.disabled = true;
       addTransaction(client.id, client.name, date, tipoState, usd, taxa, obs).then(function(){
         submitBtn.disabled = false;
+      });
+    });
+
+    var pendingAddForm = host.querySelector('#pendingAddForm');
+    var pendingTipoState = 'Compra';
+    var pendingSegBtns = pendingAddForm.querySelectorAll('.seg button');
+    Array.prototype.forEach.call(pendingSegBtns, function(b){
+      b.addEventListener('click', function(){
+        pendingTipoState = b.getAttribute('data-tipo');
+        Array.prototype.forEach.call(pendingSegBtns, function(x){ x.classList.toggle('on', x===b); });
+      });
+    });
+    pendingAddForm.addEventListener('submit', function(ev){
+      ev.preventDefault();
+      var usdEl2 = pendingAddForm.querySelector('#pendingUsd');
+      var usd = parseFloat(usdEl2.value);
+      if(!(usd > 0)) return;
+      addPending(client.id, client.name, pendingTipoState, usd, '');
+    });
+
+    Array.prototype.forEach.call(host.querySelectorAll('[data-pdel]'), function(btn){
+      btn.addEventListener('click', function(){
+        deletePending(btn.getAttribute('data-pdel'));
+      });
+    });
+
+    Array.prototype.forEach.call(host.querySelectorAll('form.pending-close'), function(closeForm){
+      closeForm.addEventListener('submit', function(ev){
+        ev.preventDefault();
+        var tipo = closeForm.getAttribute('data-tipo');
+        var taxa = parseFloat(closeForm.querySelector('.pc-taxa').value);
+        var date = closeForm.querySelector('.pc-date').value || summaryDate;
+        if(!(taxa > 0)) return;
+        closePending(client.id, client.name, tipo, taxa, date, '');
       });
     });
 

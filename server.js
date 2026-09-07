@@ -91,6 +91,59 @@ app.delete('/api/transactions/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/pending', async (req, res) => {
+  await db.ready;
+  res.json(await db.listPending());
+});
+
+app.post('/api/pending', async (req, res) => {
+  await db.ready;
+  const { clientId, clientName, tipo, usd, obs } = req.body;
+  const usdNum = Number(usd);
+  if (!clientId || !clientName || (tipo !== 'Compra' && tipo !== 'Venda') || !(usdNum > 0)) {
+    return res.status(400).json({ error: 'invalid pending entry' });
+  }
+  const entry = await db.addPending({
+    clientId,
+    clientName,
+    tipo,
+    usd: usdNum,
+    obs: (obs || '').slice(0, 500),
+  });
+  res.json(entry);
+});
+
+app.delete('/api/pending/:id', async (req, res) => {
+  await db.ready;
+  await db.deletePending(req.params.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/pending/close', async (req, res) => {
+  await db.ready;
+  const { clientId, clientName, tipo, taxa, date, obs } = req.body;
+  const taxaNum = Number(taxa);
+  if (
+    !clientId ||
+    !clientName ||
+    (tipo !== 'Compra' && tipo !== 'Venda') ||
+    !(taxaNum > 0) ||
+    !date
+  ) {
+    return res.status(400).json({ error: 'invalid close request' });
+  }
+  const tx = await db.closePending({
+    clientId,
+    clientName,
+    tipo,
+    taxa: taxaNum,
+    date,
+    obs: (obs || '').slice(0, 500),
+  });
+  if (!tx) return res.status(400).json({ error: 'no pending amount for this client/tipo' });
+  res.json(tx);
+});
+
 app.get(/^(?!\/api\/).*/, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
