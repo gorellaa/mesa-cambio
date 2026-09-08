@@ -179,7 +179,12 @@
     border-radius:var(--radius);
     padding:14px 16px;
     box-shadow:var(--shadow);
+    font-family:inherit;
+    text-align:left;
+    cursor:default;
   }
+  button.tile{ cursor:pointer; color:inherit; }
+  button.tile:hover{ border-color:var(--amber); }
   .tile .tile-name{
     font-size:12px; font-weight:600; color:var(--muted);
     text-transform:uppercase; letter-spacing:.04em;
@@ -380,6 +385,19 @@
     padding:10px; border-radius:7px; font-weight:700; cursor:pointer; font-size:13.5px;
   }
 
+  .ledger-filter{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    font-size:12.5px; color:var(--amber-ink); background:var(--amber-soft);
+    border:1px solid var(--amber); border-radius:8px;
+    padding:8px 12px; margin-bottom:10px;
+  }
+  @media (prefers-color-scheme:dark){ .ledger-filter{ color:var(--amber); } }
+  :root[data-theme="dark"] .ledger-filter{ color:var(--amber); }
+  .ledger-filter button{
+    border:none; background:none; color:inherit; text-decoration:underline;
+    cursor:pointer; font-size:12.5px; font-weight:600; white-space:nowrap;
+  }
+
   .ledger-wrap{ overflow-x:auto; }
   table.ledger{ width:100%; border-collapse:collapse; font-size:13px; }
   table.ledger th{
@@ -481,6 +499,7 @@
   var transactions = [];
   var pending = [];
   var selectedClientId = null;
+  var ledgerDateFilter = null;
   var summaryDate = todayStr();
   var POLL_MS = 8000;
 
@@ -641,11 +660,11 @@
       var c = byClient[id];
       grandUsd += c.usd; grandBrl += c.brl;
       var rate = c.usd ? c.brl/c.usd : 0;
-      return '<div class="tile">' +
+      return '<button type="button" class="tile" data-tile-client="' + id + '" title="Ver lançamentos deste cliente em ' + fmtDateBR(summaryDate) + '">' +
         '<div class="tile-name">' + esc(c.name) + '</div>' +
         '<div class="tile-brl num">' + fmtBRL(c.brl) + '</div>' +
         '<div class="tile-row"><span>' + fmtUSD(c.usd) + '</span><span class="num">' + fmtRate(rate) + '</span></div>' +
-      '</div>';
+      '</button>';
     }).join('');
     var grandRate = grandUsd ? grandBrl/grandUsd : 0;
     html += '<div class="tile grand">' +
@@ -654,6 +673,14 @@
       '<div class="tile-row"><span>' + fmtUSD(grandUsd) + '</span><span class="num">' + fmtRate(grandRate) + '</span></div>' +
     '</div>';
     host.innerHTML = html;
+
+    Array.prototype.forEach.call(host.querySelectorAll('[data-tile-client]'), function(btn){
+      btn.addEventListener('click', function(){
+        selectedClientId = btn.getAttribute('data-tile-client');
+        ledgerDateFilter = summaryDate;
+        render();
+      });
+    });
   }
 
   function clientStats(clientId){
@@ -693,6 +720,7 @@
     Array.prototype.forEach.call(host.querySelectorAll('.client-row'), function(btn){
       btn.addEventListener('click', function(){
         selectedClientId = btn.getAttribute('data-id');
+        ledgerDateFilter = null;
         render();
       });
     });
@@ -706,7 +734,14 @@
       return;
     }
     var s = clientStats(client.id);
-    var rows = s.list.slice().sort(function(a,b){ return (b.createdAt||'').localeCompare(a.createdAt||''); });
+    var allRows = s.list.slice().sort(function(a,b){ return (b.createdAt||'').localeCompare(a.createdAt||''); });
+    var rows = ledgerDateFilter ? allRows.filter(function(t){ return t.date === ledgerDateFilter; }) : allRows;
+
+    var filterBannerHtml = ledgerDateFilter ?
+      '<div class="ledger-filter">' +
+        '<span>Mostrando lançamentos de <strong>' + fmtDateBR(ledgerDateFilter) + '</strong></span>' +
+        '<button type="button" id="clearLedgerFilter">Ver histórico completo</button>' +
+      '</div>' : '';
 
     var rowsHtml = rows.length ? rows.map(function(t){
       return '<tr data-id="' + t.id + '">' +
@@ -776,10 +811,12 @@
         '<button type="submit" class="submit-btn">Adicionar lançamento</button>' +
       '</form>' +
 
+      filterBannerHtml +
+
       '<div class="ledger-wrap">' +
         (rows.length ?
           '<table class="ledger"><thead><tr><th>Data</th><th>Tipo</th><th>USD</th><th>Taxa</th><th>BRL</th><th>Obs</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table>'
-          : '<div class="ledger-empty">Nenhum lançamento ainda para ' + esc(client.name) + '.</div>') +
+          : '<div class="ledger-empty">' + (ledgerDateFilter ? 'Nenhum lançamento de ' + esc(client.name) + ' em ' + fmtDateBR(ledgerDateFilter) + '.' : 'Nenhum lançamento ainda para ' + esc(client.name) + '.') + '</div>') +
       '</div>';
 
     var delClientBtn = document.createElement('button');
@@ -875,6 +912,14 @@
         if(tx) openReceipt(tx);
       });
     });
+
+    var clearFilterBtn = host.querySelector('#clearLedgerFilter');
+    if(clearFilterBtn){
+      clearFilterBtn.addEventListener('click', function(){
+        ledgerDateFilter = null;
+        renderWorkpane();
+      });
+    }
   }
 
   function openReceipt(tx){
