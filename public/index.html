@@ -334,6 +334,52 @@
     font-size:13px; padding:8px 16px; border-radius:7px; cursor:pointer;
   }
 
+  .receipt-btn{
+    border:none; background:none; color:var(--amber-ink); cursor:pointer;
+    font-size:14px; padding:2px 6px; border-radius:6px;
+  }
+  @media (prefers-color-scheme:dark){ .receipt-btn{ color:var(--amber); } }
+  :root[data-theme="dark"] .receipt-btn{ color:var(--amber); }
+  .receipt-btn:hover{ background:var(--amber-soft); }
+
+  .receipt-overlay{
+    position:fixed; inset:0; background:rgba(20,17,13,.55);
+    display:flex; align-items:center; justify-content:center;
+    padding:20px; z-index:50;
+  }
+  .receipt-overlay[hidden]{ display:none; }
+  .receipt-card{
+    background:var(--paper-2); border:1px solid var(--line); border-radius:12px;
+    padding:22px; max-width:360px; width:100%; box-shadow:var(--shadow);
+  }
+  .receipt-card .rc-brand{
+    font-size:11px; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--muted); margin-bottom:10px;
+  }
+  .receipt-card h3{ font-size:17px; font-weight:700; }
+  .receipt-card .rc-sub{ font-size:12.5px; color:var(--muted); margin:2px 0 14px; }
+  .receipt-list{
+    list-style:none; padding:0; margin:0 0 12px;
+    font-family:"IBM Plex Mono",monospace; font-size:13px;
+  }
+  .receipt-list li{
+    display:flex; justify-content:space-between; gap:10px;
+    padding:5px 0; border-bottom:1px dashed var(--line);
+  }
+  .receipt-list li:last-child{ border-bottom:none; }
+  .receipt-list li .ri-n{ color:var(--muted); }
+  .receipt-totals{
+    border-top:2px solid var(--ink); padding-top:10px; margin-top:2px;
+    display:flex; flex-direction:column; gap:5px;
+    font-family:"IBM Plex Mono",monospace; font-size:13px;
+  }
+  .receipt-totals .rt-row{ display:flex; justify-content:space-between; }
+  .receipt-totals .rt-row.grand{ font-weight:700; font-size:16px; margin-top:2px; }
+  .receipt-close{
+    margin-top:18px; width:100%; border:none; background:var(--ink); color:var(--paper);
+    padding:10px; border-radius:7px; font-weight:700; cursor:pointer; font-size:13.5px;
+  }
+
   .ledger-wrap{ overflow-x:auto; }
   table.ledger{ width:100%; border-collapse:collapse; font-size:13px; }
   table.ledger th{
@@ -421,6 +467,10 @@
   </section>
 
   <footer class="foot">Os dados ficam salvos no servidor e sincronizam entre todos os aparelhos com este link.</footer>
+</div>
+
+<div class="receipt-overlay" id="receiptOverlay" hidden>
+  <div class="receipt-card" id="receiptCard"></div>
 </div>
 
 <script>
@@ -666,7 +716,10 @@
         '<td class="num">' + fmtRate(t.taxa) + '</td>' +
         '<td class="num">' + fmtBRL(t.brl) + '</td>' +
         '<td class="obs">' + esc(t.obs||'') + '</td>' +
-        '<td><button type="button" class="del-btn" data-del="' + t.id + '" title="Excluir lançamento">✕</button></td>' +
+        '<td>' +
+          (t.breakdown && t.breakdown.length ? '<button type="button" class="receipt-btn" data-receipt="' + t.id + '" title="Ver comprovante">🧾</button>' : '') +
+          '<button type="button" class="del-btn" data-del="' + t.id + '" title="Excluir lançamento">✕</button>' +
+        '</td>' +
       '</tr>';
     }).join('') : '';
 
@@ -815,7 +868,42 @@
         if(confirm('Excluir este lançamento?')) deleteTransaction(btn.getAttribute('data-del'));
       });
     });
+
+    Array.prototype.forEach.call(host.querySelectorAll('[data-receipt]'), function(btn){
+      btn.addEventListener('click', function(){
+        var tx = transactions.find(function(t){ return t.id === btn.getAttribute('data-receipt'); });
+        if(tx) openReceipt(tx);
+      });
+    });
   }
+
+  function openReceipt(tx){
+    var card = document.getElementById('receiptCard');
+    var itemsHtml = tx.breakdown.map(function(v, i){
+      return '<li><span class="ri-n">' + (i+1) + '.</span><span class="num">' + fmtBRL(v) + '</span></li>';
+    }).join('');
+    card.innerHTML =
+      '<div class="rc-brand">Mesa de Câmbio · Comprovante</div>' +
+      '<h3>' + esc(tx.clientName) + '</h3>' +
+      '<div class="rc-sub">' + fmtDateBR(tx.date) + ' · ' + tx.tipo + ' · ' + tx.breakdown.length + ' envio' + (tx.breakdown.length===1?'':'s') + '</div>' +
+      '<ul class="receipt-list">' + itemsHtml + '</ul>' +
+      '<div class="receipt-totals">' +
+        '<div class="rt-row"><span>Total enviado</span><span class="num">' + fmtBRL(tx.brl) + '</span></div>' +
+        '<div class="rt-row"><span>Taxa fechada</span><span class="num">' + fmtRate(tx.taxa) + '</span></div>' +
+        '<div class="rt-row grand"><span>Total em USD</span><span class="num">' + fmtUSD(tx.usd) + '</span></div>' +
+      '</div>' +
+      '<button type="button" class="receipt-close" id="receiptCloseBtn">Fechar</button>';
+    document.getElementById('receiptOverlay').hidden = false;
+    document.getElementById('receiptCloseBtn').addEventListener('click', closeReceipt);
+  }
+
+  function closeReceipt(){
+    document.getElementById('receiptOverlay').hidden = true;
+  }
+
+  document.getElementById('receiptOverlay').addEventListener('click', function(ev){
+    if(ev.target.id === 'receiptOverlay') closeReceipt();
+  });
 
   // ---------------- wiring ----------------
 

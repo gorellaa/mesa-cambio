@@ -18,6 +18,7 @@ function rowToTx(r) {
     taxa: Number(r.taxa),
     brl: Number(r.brl),
     obs: r.obs || '',
+    breakdown: r.breakdown ? JSON.parse(r.breakdown) : null,
     createdAt: r.created_at,
   };
 }
@@ -63,6 +64,7 @@ if (DATABASE_URL) {
       obs TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
+    await pool.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS breakdown TEXT`);
     await pool.query(`CREATE TABLE IF NOT EXISTS pending (
       id TEXT PRIMARY KEY,
       client_id TEXT NOT NULL,
@@ -132,11 +134,12 @@ if (DATABASE_URL) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        const sumR = await client.query(
-          'SELECT COALESCE(SUM(usd),0) AS total FROM pending WHERE client_id = $1 AND tipo = $2',
+        const rowsR = await client.query(
+          'SELECT usd FROM pending WHERE client_id = $1 AND tipo = $2 ORDER BY created_at ASC',
           [clientId, tipo]
         );
-        const brl = Math.round(Number(sumR.rows[0].total) * 100) / 100;
+        const amounts = rowsR.rows.map((r) => Number(r.usd));
+        const brl = Math.round(amounts.reduce((s, v) => s + v, 0) * 100) / 100;
         if (!(brl > 0)) {
           await client.query('ROLLBACK');
           return null;
@@ -145,9 +148,9 @@ if (DATABASE_URL) {
         const id = crypto.randomUUID();
         const txR = await client.query(
           `INSERT INTO transactions
-            (id, client_id, client_name, date, tipo, usd, taxa, brl, obs)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-          [id, clientId, clientName, date, tipo, usd, taxa, brl, obs || '']
+            (id, client_id, client_name, date, tipo, usd, taxa, brl, obs, breakdown)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+          [id, clientId, clientName, date, tipo, usd, taxa, brl, obs || '', JSON.stringify(amounts)]
         );
         await client.query('DELETE FROM pending WHERE client_id = $1 AND tipo = $2', [
           clientId,
@@ -233,8 +236,11 @@ if (DATABASE_URL) {
     },
     async closePending({ clientId, clientName, tipo, taxa, date, obs }) {
       const data = load();
-      const matching = data.pending.filter((p) => p.clientId === clientId && p.tipo === tipo);
-      const brl = Math.round(matching.reduce((s, p) => s + p.brl, 0) * 100) / 100;
+      const matching = data.pending
+        .filter((p) => p.clientId === clientId && p.tipo === tipo)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      const amounts = matching.map((p) => p.brl);
+      const brl = Math.round(amounts.reduce((s, v) => s + v, 0) * 100) / 100;
       if (!(brl > 0)) return null;
       const usd = Math.round((brl / taxa) * 100) / 100;
       const tx = {
@@ -247,6 +253,7 @@ if (DATABASE_URL) {
         taxa,
         brl,
         obs: obs || '',
+        breakdown: amounts,
         createdAt: new Date().toISOString(),
       };
       data.transactions.push(tx);
