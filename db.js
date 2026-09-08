@@ -27,7 +27,9 @@ function rowToPending(r) {
     clientId: r.client_id,
     clientName: r.client_name,
     tipo: r.tipo,
-    usd: Number(r.usd),
+    // the underlying column is still named "usd" for historical reasons,
+    // but pending entries hold a BRL amount (converted at close time)
+    brl: Number(r.usd),
     obs: r.obs || '',
     createdAt: r.created_at,
   };
@@ -119,7 +121,7 @@ if (DATABASE_URL) {
       const r = await pool.query(
         `INSERT INTO pending (id, client_id, client_name, tipo, usd, obs)
          VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [id, p.clientId, p.clientName, p.tipo, p.usd, p.obs || '']
+        [id, p.clientId, p.clientName, p.tipo, p.brl, p.obs || '']
       );
       return rowToPending(r.rows[0]);
     },
@@ -134,12 +136,12 @@ if (DATABASE_URL) {
           'SELECT COALESCE(SUM(usd),0) AS total FROM pending WHERE client_id = $1 AND tipo = $2',
           [clientId, tipo]
         );
-        const usd = Number(sumR.rows[0].total);
-        if (!(usd > 0)) {
+        const brl = Math.round(Number(sumR.rows[0].total) * 100) / 100;
+        if (!(brl > 0)) {
           await client.query('ROLLBACK');
           return null;
         }
-        const brl = Math.round(usd * taxa * 100) / 100;
+        const usd = Math.round((brl / taxa) * 100) / 100;
         const id = crypto.randomUUID();
         const txR = await client.query(
           `INSERT INTO transactions
@@ -232,9 +234,9 @@ if (DATABASE_URL) {
     async closePending({ clientId, clientName, tipo, taxa, date, obs }) {
       const data = load();
       const matching = data.pending.filter((p) => p.clientId === clientId && p.tipo === tipo);
-      const usd = matching.reduce((s, p) => s + p.usd, 0);
-      if (!(usd > 0)) return null;
-      const brl = Math.round(usd * taxa * 100) / 100;
+      const brl = Math.round(matching.reduce((s, p) => s + p.brl, 0) * 100) / 100;
+      if (!(brl > 0)) return null;
+      const usd = Math.round((brl / taxa) * 100) / 100;
       const tx = {
         id: crypto.randomUUID(),
         clientId,

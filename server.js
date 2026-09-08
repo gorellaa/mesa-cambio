@@ -98,16 +98,16 @@ app.get('/api/pending', async (req, res) => {
 
 app.post('/api/pending', async (req, res) => {
   await db.ready;
-  const { clientId, clientName, tipo, usd, obs } = req.body;
-  const usdNum = Number(usd);
-  if (!clientId || !clientName || (tipo !== 'Compra' && tipo !== 'Venda') || !(usdNum > 0)) {
+  const { clientId, clientName, tipo, brl, obs } = req.body;
+  const brlNum = Number(brl);
+  if (!clientId || !clientName || (tipo !== 'Compra' && tipo !== 'Venda') || !(brlNum > 0)) {
     return res.status(400).json({ error: 'invalid pending entry' });
   }
   const entry = await db.addPending({
     clientId,
     clientName,
     tipo,
-    usd: usdNum,
+    brl: brlNum,
     obs: (obs || '').slice(0, 500),
   });
   res.json(entry);

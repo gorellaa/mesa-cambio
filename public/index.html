@@ -531,10 +531,10 @@
       showBanner('Não foi possível adicionar o cliente.', true);
     });
   }
-  function addPending(clientId, clientName, tipo, usd, obs){
+  function addPending(clientId, clientName, tipo, brl, obs){
     return api('/pending', {
       method:'POST',
-      body: JSON.stringify({clientId:clientId, clientName:clientName, tipo:tipo, usd:usd, obs:obs})
+      body: JSON.stringify({clientId:clientId, clientName:clientName, tipo:tipo, brl:brl, obs:obs})
     }).then(loadAll).catch(function(){
       showBanner('Não foi possível adicionar o valor pendente.', true);
     });
@@ -619,7 +619,7 @@
     ['Compra','Venda'].forEach(function(tipo){
       var items = list.filter(function(p){ return p.tipo === tipo; });
       if(items.length){
-        groups[tipo] = { items: items, total: items.reduce(function(s,p){ return s+p.usd; }, 0) };
+        groups[tipo] = { items: items, total: items.reduce(function(s,p){ return s+p.brl; }, 0) };
       }
     });
     return groups;
@@ -675,11 +675,11 @@
       var g = pendingGroups[tipo];
       if(!g) return '';
       var itemsHtml = g.items.map(function(p){
-        return '<span class="pending-chip">' + fmtUSD(p.usd) + '<button type="button" data-pdel="' + p.id + '" title="Remover">✕</button></span>';
+        return '<span class="pending-chip">' + fmtBRL(p.brl) + '<button type="button" data-pdel="' + p.id + '" title="Remover">✕</button></span>';
       }).join('');
       return '<div class="pending-group" data-tipo="' + tipo + '">' +
         '<div class="pending-items">' + itemsHtml + '</div>' +
-        '<div class="pending-total"><span class="pt-tipo ' + (tipo==='Compra'?'compra':'venda') + '">' + tipo + ' pendente</span><span class="pt-val num">' + fmtUSD(g.total) + '</span></div>' +
+        '<div class="pending-total"><span class="pt-tipo ' + (tipo==='Compra'?'compra':'venda') + '">' + tipo + ' pendente</span><span class="pt-val num">' + fmtBRL(g.total) + '</span></div>' +
         '<form class="pending-close" data-tipo="' + tipo + '">' +
           '<div class="field"><label>Taxa (R$)</label><input type="number" step="0.0001" min="0" inputmode="decimal" class="num pc-taxa" placeholder="0,0000" required></div>' +
           '<div class="field"><label>Data</label><input type="date" class="pc-date" value="' + summaryDate + '" required></div>' +
@@ -694,7 +694,7 @@
         '<div class="pb-help">Some os valores conforme o cliente for mandando ao longo do dia. No final, feche com a taxa combinada.</div>' +
         '<form class="pending-add" id="pendingAddForm">' +
           '<div class="field"><label>Tipo</label><div class="seg"><button type="button" class="on compra" data-tipo="Compra">Compra</button><button type="button" class="venda" data-tipo="Venda">Venda</button></div></div>' +
-          '<div class="field"><label>Valor USD</label><input type="number" step="0.01" min="0" inputmode="decimal" id="pendingUsd" class="num" placeholder="0,00" required></div>' +
+          '<div class="field"><label>Valor BRL</label><input type="number" step="0.01" min="0" inputmode="decimal" id="pendingBrl" class="num" placeholder="0,00" required></div>' +
           '<button type="submit" class="add-btn">Adicionar</button>' +
         '</form>' +
         pendingGroupsHtml +
@@ -787,10 +787,10 @@
     });
     pendingAddForm.addEventListener('submit', function(ev){
       ev.preventDefault();
-      var usdEl2 = pendingAddForm.querySelector('#pendingUsd');
-      var usd = parseFloat(usdEl2.value);
-      if(!(usd > 0)) return;
-      addPending(client.id, client.name, pendingTipoState, usd, '');
+      var brlEl = pendingAddForm.querySelector('#pendingBrl');
+      var brl = parseFloat(brlEl.value);
+      if(!(brl > 0)) return;
+      addPending(client.id, client.name, pendingTipoState, brl, '');
     });
 
     Array.prototype.forEach.call(host.querySelectorAll('[data-pdel]'), function(btn){
