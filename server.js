@@ -100,13 +100,21 @@ app.post('/api/pending', async (req, res) => {
   await db.ready;
   const { clientId, clientName, tipo, brl, obs } = req.body;
   const brlNum = Number(brl);
-  if (!clientId || !clientName || (tipo !== 'Compra' && tipo !== 'Venda') || !(brlNum > 0)) {
+  // tipo is optional: omitted (or null) means "not classified yet" —
+  // used by the WhatsApp bot, which only confirms an amount and leaves
+  // Compra/Venda for a human to decide when closing.
+  if (
+    !clientId ||
+    !clientName ||
+    (tipo != null && tipo !== 'Compra' && tipo !== 'Venda') ||
+    !(brlNum > 0)
+  ) {
     return res.status(400).json({ error: 'invalid pending entry' });
   }
   const entry = await db.addPending({
     clientId,
     clientName,
-    tipo,
+    tipo: tipo || null,
     brl: brlNum,
     obs: (obs || '').slice(0, 500),
   });
@@ -121,12 +129,13 @@ app.delete('/api/pending/:id', async (req, res) => {
 
 app.post('/api/pending/close', async (req, res) => {
   await db.ready;
-  const { clientId, clientName, tipo, taxa, date, obs } = req.body;
+  const { clientId, clientName, sourceTipo, targetTipo, taxa, date, obs } = req.body;
   const taxaNum = Number(taxa);
   if (
     !clientId ||
     !clientName ||
-    (tipo !== 'Compra' && tipo !== 'Venda') ||
+    (sourceTipo != null && sourceTipo !== 'Compra' && sourceTipo !== 'Venda') ||
+    (targetTipo !== 'Compra' && targetTipo !== 'Venda') ||
     !(taxaNum > 0) ||
     !date
   ) {
@@ -135,7 +144,8 @@ app.post('/api/pending/close', async (req, res) => {
   const tx = await db.closePending({
     clientId,
     clientName,
-    tipo,
+    sourceTipo: sourceTipo || null,
+    targetTipo,
     taxa: taxaNum,
     date,
     obs: (obs || '').slice(0, 500),

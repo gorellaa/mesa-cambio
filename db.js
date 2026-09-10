@@ -69,11 +69,14 @@ if (DATABASE_URL) {
       id TEXT PRIMARY KEY,
       client_id TEXT NOT NULL,
       client_name TEXT NOT NULL,
-      tipo TEXT NOT NULL,
+      tipo TEXT,
       usd DOUBLE PRECISION NOT NULL,
       obs TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
+    // tipo used to be required; entries confirmed by the WhatsApp bot arrive
+    // with no tipo yet (classified as Compra/Venda only when closed)
+    await pool.query(`ALTER TABLE pending ALTER COLUMN tipo DROP NOT NULL`);
   })();
 
   impl = {
@@ -123,20 +126,20 @@ if (DATABASE_URL) {
       const r = await pool.query(
         `INSERT INTO pending (id, client_id, client_name, tipo, usd, obs)
          VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [id, p.clientId, p.clientName, p.tipo, p.brl, p.obs || '']
+        [id, p.clientId, p.clientName, p.tipo || null, p.brl, p.obs || '']
       );
       return rowToPending(r.rows[0]);
     },
     async deletePending(id) {
       await pool.query('DELETE FROM pending WHERE id = $1', [id]);
     },
-    async closePending({ clientId, clientName, tipo, taxa, date, obs }) {
+    async closePending({ clientId, clientName, sourceTipo, targetTipo, taxa, date, obs }) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
         const rowsR = await client.query(
-          'SELECT usd FROM pending WHERE client_id = $1 AND tipo = $2 ORDER BY created_at ASC',
-          [clientId, tipo]
+          'SELECT usd FROM pending WHERE client_id = $1 AND tipo IS NOT DISTINCT FROM $2 ORDER BY created_at ASC',
+          [clientId, sourceTipo || null]
         );
         const amounts = rowsR.rows.map((r) => Number(r.usd));
         const brl = Math.round(amounts.reduce((s, v) => s + v, 0) * 100) / 100;
@@ -150,11 +153,11 @@ if (DATABASE_URL) {
           `INSERT INTO transactions
             (id, client_id, client_name, date, tipo, usd, taxa, brl, obs, breakdown)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-          [id, clientId, clientName, date, tipo, usd, taxa, brl, obs || '', JSON.stringify(amounts)]
+          [id, clientId, clientName, date, targetTipo, usd, taxa, brl, obs || '', JSON.stringify(amounts)]
         );
-        await client.query('DELETE FROM pending WHERE client_id = $1 AND tipo = $2', [
+        await client.query('DELETE FROM pending WHERE client_id = $1 AND tipo IS NOT DISTINCT FROM $2', [
           clientId,
-          tipo,
+          sourceTipo || null,
         ]);
         await client.query('COMMIT');
         return rowToTx(txR.rows[0]);
@@ -224,7 +227,12 @@ if (DATABASE_URL) {
     },
     async addPending(p) {
       const data = load();
-      const entry = { ...p, id: crypto.randomUUID(), createdAt: new Date().toISOString() };
+      const entry = {
+        ...p,
+        tipo: p.tipo || null,
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+      };
       data.pending.push(entry);
       save(data);
       return entry;
@@ -234,10 +242,11 @@ if (DATABASE_URL) {
       data.pending = data.pending.filter((p) => p.id !== id);
       save(data);
     },
-    async closePending({ clientId, clientName, tipo, taxa, date, obs }) {
+    async closePending({ clientId, clientName, sourceTipo, targetTipo, taxa, date, obs }) {
       const data = load();
+      const src = sourceTipo || null;
       const matching = data.pending
-        .filter((p) => p.clientId === clientId && p.tipo === tipo)
+        .filter((p) => p.clientId === clientId && (p.tipo || null) === src)
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       const amounts = matching.map((p) => p.brl);
       const brl = Math.round(amounts.reduce((s, v) => s + v, 0) * 100) / 100;
@@ -248,7 +257,7 @@ if (DATABASE_URL) {
         clientId,
         clientName,
         date,
-        tipo,
+        tipo: targetTipo,
         usd,
         taxa,
         brl,
@@ -257,7 +266,7 @@ if (DATABASE_URL) {
         createdAt: new Date().toISOString(),
       };
       data.transactions.push(tx);
-      data.pending = data.pending.filter((p) => !(p.clientId === clientId && p.tipo === tipo));
+      data.pending = data.pending.filter((p) => !(p.clientId === clientId && (p.tipo || null) === src));
       save(data);
       return tx;
     },

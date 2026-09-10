@@ -330,6 +330,9 @@
     font-size:13px; font-weight:700; margin-bottom:10px;
   }
   .pending-total .pt-tipo.compra{ color:var(--buy); }
+  .pending-total .pt-tipo.unclass{ color:var(--amber-ink); }
+  @media (prefers-color-scheme:dark){ .pending-total .pt-tipo.unclass{ color:var(--amber); } }
+  :root[data-theme="dark"] .pending-total .pt-tipo.unclass{ color:var(--amber); }
   .pending-total .pt-tipo.venda{ color:var(--sell); }
   .pending-total .pt-val{ font-family:"IBM Plex Mono",monospace; }
   form.pending-close{ display:flex; gap:8px; align-items:end; flex-wrap:wrap; }
@@ -613,10 +616,10 @@
       showBanner('Não foi possível remover o valor pendente.', true);
     });
   }
-  function closePending(clientId, clientName, tipo, taxa, date, obs){
+  function closePending(clientId, clientName, sourceTipo, targetTipo, taxa, date, obs){
     return api('/pending/close', {
       method:'POST',
-      body: JSON.stringify({clientId:clientId, clientName:clientName, tipo:tipo, taxa:taxa, date:date, obs:obs})
+      body: JSON.stringify({clientId:clientId, clientName:clientName, sourceTipo:sourceTipo, targetTipo:targetTipo, taxa:taxa, date:date, obs:obs})
     }).then(loadAll).catch(function(){
       showBanner('Não foi possível fechar os valores pendentes.', true);
     });
@@ -693,10 +696,11 @@
   function clientPendingGroups(clientId){
     var list = pending.filter(function(p){ return p.clientId === clientId; });
     var groups = {};
-    ['Compra','Venda'].forEach(function(tipo){
-      var items = list.filter(function(p){ return p.tipo === tipo; });
+    ['Compra','Venda',null].forEach(function(tipo){
+      var items = list.filter(function(p){ return (p.tipo||null) === tipo; });
       if(items.length){
-        groups[tipo] = { items: items, total: items.reduce(function(s,p){ return s+p.brl; }, 0) };
+        var key = tipo || '__unclassified__';
+        groups[key] = { tipo: tipo, items: items, total: items.reduce(function(s,p){ return s+p.brl; }, 0) };
       }
     });
     return groups;
@@ -759,19 +763,27 @@
     }).join('') : '';
 
     var pendingGroups = clientPendingGroups(client.id);
-    var pendingGroupsHtml = ['Compra','Venda'].map(function(tipo){
-      var g = pendingGroups[tipo];
+    var pendingGroupsHtml = ['Compra','Venda','__unclassified__'].map(function(key){
+      var g = pendingGroups[key];
       if(!g) return '';
+      var isUnclassified = g.tipo == null;
       var itemsHtml = g.items.map(function(p){
         return '<span class="pending-chip">' + fmtBRL(p.brl) + '<button type="button" data-pdel="' + p.id + '" title="Remover">✕</button></span>';
       }).join('');
-      return '<div class="pending-group" data-tipo="' + tipo + '">' +
+      var titleHtml = isUnclassified ?
+        '<span class="pt-tipo unclass">Confirmado (a classificar)</span>' :
+        '<span class="pt-tipo ' + (g.tipo==='Compra'?'compra':'venda') + '">' + g.tipo + ' pendente</span>';
+      var tipoPickerHtml = isUnclassified ?
+        '<div class="field"><label>Tipo</label><div class="seg"><button type="button" class="on compra" data-tipo="Compra">Compra</button><button type="button" class="venda" data-tipo="Venda">Venda</button></div></div>' : '';
+      var closeLabel = isUnclassified ? 'Fechar' : ('Fechar ' + g.tipo.toLowerCase());
+      return '<div class="pending-group" data-tipo="' + (g.tipo||'') + '">' +
         '<div class="pending-items">' + itemsHtml + '</div>' +
-        '<div class="pending-total"><span class="pt-tipo ' + (tipo==='Compra'?'compra':'venda') + '">' + tipo + ' pendente</span><span class="pt-val num">' + fmtBRL(g.total) + '</span></div>' +
-        '<form class="pending-close" data-tipo="' + tipo + '">' +
+        '<div class="pending-total">' + titleHtml + '<span class="pt-val num">' + fmtBRL(g.total) + '</span></div>' +
+        '<form class="pending-close" data-source-tipo="' + (g.tipo||'') + '" data-target-tipo="' + (g.tipo||'') + '">' +
+          tipoPickerHtml +
           '<div class="field"><label>Taxa (R$)</label><input type="number" step="0.0001" min="0" inputmode="decimal" class="num pc-taxa" placeholder="0,0000" required></div>' +
           '<div class="field"><label>Data</label><input type="date" class="pc-date" value="' + summaryDate + '" required></div>' +
-          '<button type="submit" class="close-btn">Fechar ' + tipo.toLowerCase() + '</button>' +
+          '<button type="submit" class="close-btn">' + closeLabel + '</button>' +
         '</form>' +
       '</div>';
     }).join('');
@@ -890,13 +902,22 @@
     });
 
     Array.prototype.forEach.call(host.querySelectorAll('form.pending-close'), function(closeForm){
+      var sourceTipo = closeForm.getAttribute('data-source-tipo') || null;
+      var pickerBtns = closeForm.querySelectorAll('.seg button');
+      var pickedTipo = pickerBtns.length ? 'Compra' : null;
+      Array.prototype.forEach.call(pickerBtns, function(b){
+        b.addEventListener('click', function(){
+          pickedTipo = b.getAttribute('data-tipo');
+          Array.prototype.forEach.call(pickerBtns, function(x){ x.classList.toggle('on', x===b); });
+        });
+      });
       closeForm.addEventListener('submit', function(ev){
         ev.preventDefault();
-        var tipo = closeForm.getAttribute('data-tipo');
+        var targetTipo = sourceTipo || pickedTipo;
         var taxa = parseFloat(closeForm.querySelector('.pc-taxa').value);
         var date = closeForm.querySelector('.pc-date').value || summaryDate;
-        if(!(taxa > 0)) return;
-        closePending(client.id, client.name, tipo, taxa, date, '');
+        if(!(taxa > 0) || !targetTipo) return;
+        closePending(client.id, client.name, sourceTipo, targetTipo, taxa, date, '');
       });
     });
 
