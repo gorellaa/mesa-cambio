@@ -440,6 +440,38 @@
   }
   .banner.error{ background:var(--sell-soft); color:var(--sell); border-color:transparent; }
 
+  .view-tabs{
+    display:flex; gap:6px; margin-bottom:22px;
+    border-bottom:1px solid var(--line); padding-bottom:0;
+  }
+  .view-tab{
+    border:none; background:none; cursor:pointer; font-family:inherit;
+    font-size:13px; font-weight:600; color:var(--muted);
+    padding:9px 4px; margin-bottom:-1px;
+    border-bottom:2px solid transparent;
+  }
+  .view-tab:hover{ color:var(--ink); }
+  .view-tab.on{ color:var(--amber-ink); border-bottom-color:var(--amber); }
+  @media (prefers-color-scheme:dark){ .view-tab.on{ color:var(--amber); } }
+  :root[data-theme="dark"] .view-tab.on{ color:var(--amber); }
+
+  .gancia-wrap{ overflow-x:auto; }
+  table.gancia{ width:100%; border-collapse:collapse; font-size:13px; }
+  table.gancia th{
+    text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--muted); font-weight:600; padding:8px; border-bottom:1px solid var(--line); white-space:nowrap;
+  }
+  table.gancia td{ padding:8px; border-bottom:1px solid var(--rule); vertical-align:middle; white-space:nowrap; }
+  table.gancia tr:last-child td{ border-bottom:none; }
+  table.gancia .custo-input{
+    font-family:"IBM Plex Mono",monospace; font-size:13px; width:100px;
+    padding:6px 8px; border:1px solid var(--line); border-radius:7px;
+    background:var(--paper); color:var(--ink);
+  }
+  table.gancia .lucro-pos{ color:var(--buy); font-weight:700; }
+  table.gancia .lucro-neg{ color:var(--sell); font-weight:700; }
+  table.gancia .lucro-pend{ color:var(--muted); }
+
   footer.foot{
     margin-top:30px; padding-top:14px; border-top:1px solid var(--line);
     font-size:11.5px; color:var(--muted); text-align:center;
@@ -473,36 +505,50 @@
 
   <div id="bannerHost"></div>
 
-  <section id="summarySection">
-    <div class="section-head">
-      <h2>Resumo do dia</h2>
-      <div class="date-stepper">
-        <button type="button" id="dayPrev" aria-label="Dia anterior">‹</button>
-        <input type="date" id="dayInput">
-        <button type="button" id="dayNext" aria-label="Próximo dia">›</button>
-        <button type="button" id="dayToday" class="today-btn">Hoje</button>
-      </div>
-    </div>
-    <div id="tiles" class="tiles"></div>
-  </section>
+  <nav class="view-tabs">
+    <button type="button" class="view-tab on" data-view="painel">Painel</button>
+    <button type="button" class="view-tab" data-view="gancia">Histórico Ganância</button>
+  </nav>
 
-  <section>
-    <div class="section-head"><h2>Clientes &amp; lançamentos</h2></div>
-    <div class="workspace">
-      <div class="rail">
-        <div class="rail-list" id="railList"></div>
-        <form class="rail-add" id="addClientForm">
-          <input type="text" id="newClientName" placeholder="Nome do novo cliente" autocomplete="off">
-          <button type="submit">Adicionar</button>
-        </form>
-      </div>
-      <div class="workpane" id="workpane">
-        <div class="no-client">
-          <div>Selecione um cliente à esquerda,<br>ou adicione o primeiro para começar.</div>
+  <div id="painelView">
+    <section id="summarySection">
+      <div class="section-head">
+        <h2>Resumo do dia</h2>
+        <div class="date-stepper">
+          <button type="button" id="dayPrev" aria-label="Dia anterior">‹</button>
+          <input type="date" id="dayInput">
+          <button type="button" id="dayNext" aria-label="Próximo dia">›</button>
+          <button type="button" id="dayToday" class="today-btn">Hoje</button>
         </div>
       </div>
-    </div>
-  </section>
+      <div id="tiles" class="tiles"></div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>Clientes &amp; lançamentos</h2></div>
+      <div class="workspace">
+        <div class="rail">
+          <div class="rail-list" id="railList"></div>
+          <form class="rail-add" id="addClientForm">
+            <input type="text" id="newClientName" placeholder="Nome do novo cliente" autocomplete="off">
+            <button type="submit">Adicionar</button>
+          </form>
+        </div>
+        <div class="workpane" id="workpane">
+          <div class="no-client">
+            <div>Selecione um cliente à esquerda,<br>ou adicione o primeiro para começar.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="ganciaView" hidden>
+    <section>
+      <div class="section-head"><h2>Histórico Ganância</h2></div>
+      <div class="gancia-wrap" id="ganciaWrap"></div>
+    </section>
+  </div>
 
   <footer class="foot">Os dados ficam salvos no servidor e sincronizam entre todos os aparelhos com este link.</footer>
 </div>
@@ -518,8 +564,10 @@
   var clients = [];
   var transactions = [];
   var pending = [];
+  var dailyCosts = [];
   var selectedClientId = null;
   var ledgerDateFilter = null;
+  var activeView = 'painel';
   var summaryDate = todayStr();
   var POLL_MS = 8000;
 
@@ -583,11 +631,13 @@
     return Promise.all([
       api('/clients'),
       api('/transactions'),
-      api('/pending')
+      api('/pending'),
+      api('/daily-cost')
     ]).then(function(res){
       clients = res[0];
       transactions = res[1];
       pending = res[2];
+      dailyCosts = res[3];
       if(!selectedClientId && clients.length){ selectedClientId = clients[0].id; }
       if(selectedClientId && !clients.some(function(c){return c.id===selectedClientId;})){
         selectedClientId = clients.length ? clients[0].id : null;
@@ -662,6 +712,7 @@
     renderTiles();
     renderRail();
     renderWorkpane();
+    renderGancia();
   }
 
   function renderTiles(){
@@ -1024,7 +1075,100 @@
     if(ev.target.id === 'receiptOverlay') closeReceipt();
   });
 
+  function saveDailyCost(date, custo){
+    return api('/daily-cost/'+date, {method:'PUT', body: JSON.stringify({custo:custo})}).then(loadAll).catch(function(){
+      showBanner('Não foi possível salvar o custo do dia.', true);
+    });
+  }
+
+  function renderGancia(){
+    var host = document.getElementById('ganciaWrap');
+    if(!host) return;
+
+    // preserva o que o usuario esta digitando se um poll re-renderizar no meio
+    var active = document.activeElement;
+    var editingDate = (active && active.classList && active.classList.contains('custo-input'))
+      ? active.getAttribute('data-date') : null;
+    var editingValue = editingDate ? active.value : null;
+    var editingSelStart = editingDate ? active.selectionStart : null;
+    var editingSelEnd = editingDate ? active.selectionEnd : null;
+
+    var byDate = {};
+    transactions.forEach(function(t){
+      if(!byDate[t.date]) byDate[t.date] = { usd:0, brl:0 };
+      byDate[t.date].usd += t.usd;
+      byDate[t.date].brl += t.brl;
+    });
+    var dates = Object.keys(byDate).sort(function(a,b){ return b.localeCompare(a); });
+
+    if(!dates.length){
+      host.innerHTML = '<div class="empty-note">Nenhum lançamento fechado ainda.</div>';
+      return;
+    }
+
+    var costByDate = {};
+    dailyCosts.forEach(function(d){ costByDate[d.date] = d.custo; });
+
+    var rowsHtml = dates.map(function(date){
+      var d = byDate[date];
+      var rate = d.usd ? d.brl/d.usd : 0;
+      var custo = costByDate[date];
+      var lucroHtml;
+      if(custo == null){
+        lucroHtml = '<span class="lucro-pend">—</span>';
+      } else {
+        var lucro = Math.round((d.brl - d.usd*custo) * 100) / 100;
+        lucroHtml = '<span class="' + (lucro >= 0 ? 'lucro-pos' : 'lucro-neg') + '">' + fmtBRL(lucro) + '</span>';
+      }
+      return '<tr>' +
+        '<td class="num">' + fmtDateBR(date) + '</td>' +
+        '<td class="num">' + fmtUSD(d.usd) + '</td>' +
+        '<td class="num">' + fmtBRL(d.brl) + '</td>' +
+        '<td class="num">' + fmtRate(rate) + '</td>' +
+        '<td><input type="number" step="0.0001" min="0" inputmode="decimal" class="num custo-input" data-date="' + date + '" placeholder="0,0000" value="' + (custo != null ? custo : '') + '"></td>' +
+        '<td class="num">' + lucroHtml + '</td>' +
+      '</tr>';
+    }).join('');
+
+    host.innerHTML =
+      '<table class="gancia"><thead><tr>' +
+        '<th>Data</th><th>Total USD</th><th>Total BRL (receita)</th><th>Taxa média</th><th>Meu custo (R$)</th><th>Lucro</th>' +
+      '</tr></thead><tbody>' + rowsHtml + '</tbody></table>';
+
+    Array.prototype.forEach.call(host.querySelectorAll('.custo-input'), function(input){
+      function commit(){
+        var val = parseFloat(input.value);
+        var date = input.getAttribute('data-date');
+        if(val > 0 && val !== costByDate[date]) saveDailyCost(date, val);
+      }
+      input.addEventListener('change', commit);
+      input.addEventListener('keydown', function(ev){
+        if(ev.key === 'Enter'){ ev.preventDefault(); input.blur(); }
+      });
+    });
+
+    if(editingDate){
+      var toRefocus = host.querySelector('.custo-input[data-date="'+editingDate+'"]');
+      if(toRefocus){
+        toRefocus.value = editingValue;
+        toRefocus.focus();
+        try { toRefocus.setSelectionRange(editingSelStart, editingSelEnd); } catch(e){}
+      }
+    }
+  }
+
   // ---------------- wiring ----------------
+
+  Array.prototype.forEach.call(document.querySelectorAll('.view-tab'), function(tab){
+    tab.addEventListener('click', function(){
+      activeView = tab.getAttribute('data-view');
+      Array.prototype.forEach.call(document.querySelectorAll('.view-tab'), function(t){
+        t.classList.toggle('on', t===tab);
+      });
+      document.getElementById('painelView').hidden = activeView !== 'painel';
+      document.getElementById('ganciaView').hidden = activeView !== 'gancia';
+    });
+  });
 
   document.getElementById('addClientForm').addEventListener('submit', function(ev){
     ev.preventDefault();

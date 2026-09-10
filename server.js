@@ -169,6 +169,21 @@ app.post('/api/pending/close', async (req, res) => {
   res.json(tx);
 });
 
+app.get('/api/daily-cost', async (req, res) => {
+  await db.ready;
+  res.json(await db.listDailyCosts());
+});
+
+app.put('/api/daily-cost/:date', async (req, res) => {
+  await db.ready;
+  const date = req.params.date;
+  const custo = Number(req.body.custo);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !(custo > 0)) {
+    return res.status(400).json({ error: 'invalid daily cost' });
+  }
+  res.json(await db.setDailyCost(date, custo));
+});
+
 app.get(/^(?!\/api\/).*/, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });

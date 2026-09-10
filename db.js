@@ -77,6 +77,11 @@ if (DATABASE_URL) {
     // tipo used to be required; entries confirmed by the WhatsApp bot arrive
     // with no tipo yet (classified as Compra/Venda only when closed)
     await pool.query(`ALTER TABLE pending ALTER COLUMN tipo DROP NOT NULL`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS daily_cost (
+      date TEXT PRIMARY KEY,
+      custo DOUBLE PRECISION NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
   })();
 
   impl = {
@@ -175,6 +180,19 @@ if (DATABASE_URL) {
         client.release();
       }
     },
+    async listDailyCosts() {
+      const r = await pool.query('SELECT * FROM daily_cost');
+      return r.rows.map((row) => ({ date: row.date, custo: Number(row.custo) }));
+    },
+    async setDailyCost(date, custo) {
+      const r = await pool.query(
+        `INSERT INTO daily_cost (date, custo) VALUES ($1, $2)
+         ON CONFLICT (date) DO UPDATE SET custo = $2, updated_at = now()
+         RETURNING *`,
+        [date, custo]
+      );
+      return { date: r.rows[0].date, custo: Number(r.rows[0].custo) };
+    },
   };
 } else {
   // Local development fallback only: a JSON file next to this script.
@@ -186,9 +204,10 @@ if (DATABASE_URL) {
     try {
       const data = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       if (!data.pending) data.pending = [];
+      if (!data.dailyCosts) data.dailyCosts = [];
       return data;
     } catch (e) {
-      return { clients: [], transactions: [], pending: [] };
+      return { clients: [], transactions: [], pending: [], dailyCosts: [] };
     }
   }
   function save(data) {
@@ -284,6 +303,17 @@ if (DATABASE_URL) {
       data.pending = data.pending.filter((p) => !(p.clientId === clientId && (p.tipo || null) === src));
       save(data);
       return tx;
+    },
+    async listDailyCosts() {
+      return load().dailyCosts;
+    },
+    async setDailyCost(date, custo) {
+      const data = load();
+      const existing = data.dailyCosts.find((d) => d.date === date);
+      if (existing) existing.custo = custo;
+      else data.dailyCosts.push({ date, custo });
+      save(data);
+      return { date, custo };
     },
   };
 }
