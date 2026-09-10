@@ -45,9 +45,24 @@ app.post('/api/clients', async (req, res) => {
   res.json(await db.addClient(name));
 });
 
+app.put('/api/clients/:id', async (req, res) => {
+  await db.ready;
+  const name = (req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const updated = await db.renameClient(req.params.id, name);
+  if (!updated) return res.status(404).json({ error: 'client not found' });
+  res.json(updated);
+});
+
 app.delete('/api/clients/:id', async (req, res) => {
   await db.ready;
-  await db.deleteClient(req.params.id);
+  const id = req.params.id;
+  const [txs, pend] = await Promise.all([db.listTransactions(), db.listPending()]);
+  const hasHistory = txs.some((t) => t.clientId === id) || pend.some((p) => p.clientId === id);
+  if (hasHistory) {
+    return res.status(400).json({ error: 'client has transactions or pending amounts' });
+  }
+  await db.deleteClient(id);
   res.json({ ok: true });
 });
 

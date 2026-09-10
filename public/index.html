@@ -252,6 +252,23 @@
     font-size:11.5px; padding:5px 9px; border-radius:7px; cursor:pointer;
   }
   .client-head .del-client:hover{ color:var(--sell); border-color:var(--sell); }
+  .rename-btn{
+    border:none; background:none; cursor:pointer; font-size:13px;
+    padding:2px 4px; border-radius:6px; vertical-align:middle;
+  }
+  .rename-btn:hover{ background:var(--amber-soft); }
+  .rename-form{ display:flex; gap:6px; align-items:center; margin-top:6px; }
+  .rename-form input{
+    font-family:inherit; font-size:13px; padding:5px 8px;
+    border:1px solid var(--line); border-radius:7px;
+    background:var(--paper); color:var(--ink);
+  }
+  .rename-form button{
+    border:none; border-radius:7px; padding:5px 10px; font-size:12px;
+    font-weight:600; cursor:pointer;
+  }
+  .rename-form .rename-save{ background:var(--ink); color:var(--paper); }
+  .rename-form .rename-cancel{ background:var(--paper); color:var(--muted); border:1px solid var(--line); }
   .rate-readout{ text-align:right; }
   .rate-readout .rl{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
   .rate-readout .rv{ font-size:26px; font-weight:700; color:var(--amber-ink); }
@@ -629,7 +646,13 @@
       if(selectedClientId===id) selectedClientId = null;
       return loadAll();
     }).catch(function(){
-      showBanner('Não foi possível remover o cliente.', true);
+      showBanner('Não foi possível remover o cliente. Ele ainda tem lançamentos ou valores pendentes.', true);
+    });
+  }
+
+  function renameClient(id, name){
+    return api('/clients/'+id, {method:'PUT', body: JSON.stringify({name:name})}).then(loadAll).catch(function(){
+      showBanner('Não foi possível renomear o cliente.', true);
     });
   }
 
@@ -802,7 +825,15 @@
 
     host.innerHTML =
       '<div class="client-head">' +
-        '<div><h3>' + esc(client.name) + '</h3><div class="sub">' + s.list.length + ' lançamento' + (s.list.length===1?'':'s') + ' · ' + fmtUSD(s.usd) + '</div></div>' +
+        '<div>' +
+          '<h3><span id="clientNameText">' + esc(client.name) + '</span> <button type="button" class="rename-btn" id="renameClientBtn" title="Renomear cliente">✏️</button></h3>' +
+          '<form class="rename-form" id="renameForm" hidden>' +
+            '<input type="text" id="renameInput" value="' + esc(client.name) + '">' +
+            '<button type="submit" class="rename-save">Salvar</button>' +
+            '<button type="button" class="rename-cancel" id="renameCancelBtn">Cancelar</button>' +
+          '</form>' +
+          '<div class="sub">' + s.list.length + ' lançamento' + (s.list.length===1?'':'s') + ' · ' + fmtUSD(s.usd) + '</div>' +
+        '</div>' +
         '<div class="rate-readout"><div class="rl">Taxa média</div><div class="rv num">' + (s.list.length? fmtRate(s.rate) : '—') + '</div></div>' +
       '</div>' +
 
@@ -831,16 +862,38 @@
           : '<div class="ledger-empty">' + (ledgerDateFilter ? 'Nenhum lançamento de ' + esc(client.name) + ' em ' + fmtDateBR(ledgerDateFilter) + '.' : 'Nenhum lançamento ainda para ' + esc(client.name) + '.') + '</div>') +
       '</div>';
 
+    var hasPendingAny = Object.keys(pendingGroups).length > 0;
     var delClientBtn = document.createElement('button');
     delClientBtn.type = 'button';
     delClientBtn.className = 'del-client';
     delClientBtn.textContent = 'Remover cliente';
-    delClientBtn.title = s.list.length ? 'Só é possível remover clientes sem lançamentos' : 'Remover cliente';
-    delClientBtn.disabled = s.list.length > 0;
+    delClientBtn.title = (s.list.length || hasPendingAny) ? 'Só é possível remover clientes sem lançamentos nem valores pendentes' : 'Remover cliente';
+    delClientBtn.disabled = s.list.length > 0 || hasPendingAny;
     host.querySelector('.client-head > div:first-child').appendChild(document.createElement('br'));
     host.querySelector('.client-head').appendChild(delClientBtn);
     delClientBtn.addEventListener('click', function(){
       if(confirm('Remover o cliente "' + client.name + '"?')) deleteClient(client.id);
+    });
+
+    var renameForm = host.querySelector('#renameForm');
+    var renameBtn = host.querySelector('#renameClientBtn');
+    renameBtn.addEventListener('click', function(){
+      renameForm.hidden = !renameForm.hidden;
+      if(!renameForm.hidden){
+        var input = renameForm.querySelector('#renameInput');
+        input.focus();
+        input.select();
+      }
+    });
+    host.querySelector('#renameCancelBtn').addEventListener('click', function(){
+      renameForm.hidden = true;
+    });
+    renameForm.addEventListener('submit', function(ev){
+      ev.preventDefault();
+      var newName = renameForm.querySelector('#renameInput').value.trim();
+      if(!newName || newName === client.name){ renameForm.hidden = true; return; }
+      renameForm.hidden = true;
+      renameClient(client.id, newName);
     });
 
     var formEl = host.querySelector('#txForm');

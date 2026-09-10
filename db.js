@@ -96,6 +96,13 @@ if (DATABASE_URL) {
     async deleteClient(id) {
       await pool.query('DELETE FROM clients WHERE id = $1', [id]);
     },
+    async renameClient(id, name) {
+      const r = await pool.query(
+        'UPDATE clients SET name = $1 WHERE id = $2 RETURNING *',
+        [name, id]
+      );
+      return r.rows[0] ? rowToClient(r.rows[0]) : null;
+    },
     async listTransactions() {
       const r = await pool.query(
         'SELECT * FROM transactions ORDER BY created_at DESC LIMIT 2000'
@@ -204,6 +211,14 @@ if (DATABASE_URL) {
       const data = load();
       data.clients = data.clients.filter((c) => c.id !== id);
       save(data);
+    },
+    async renameClient(id, name) {
+      const data = load();
+      const c = data.clients.find((c) => c.id === id);
+      if (!c) return null;
+      c.name = name;
+      save(data);
+      return c;
     },
     async listTransactions() {
       return load()
