@@ -20,6 +20,7 @@ function rowToTx(r) {
     obs: r.obs || '',
     breakdown: r.breakdown ? JSON.parse(r.breakdown) : null,
     createdAt: r.created_at,
+    deletedAt: r.deleted_at || null,
   };
 }
 function rowToPending(r) {
@@ -65,6 +66,7 @@ if (DATABASE_URL) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
     await pool.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS breakdown TEXT`);
+    await pool.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`);
     await pool.query(`CREATE TABLE IF NOT EXISTS pending (
       id TEXT PRIMARY KEY,
       client_id TEXT NOT NULL,
@@ -110,7 +112,13 @@ if (DATABASE_URL) {
     },
     async listTransactions() {
       const r = await pool.query(
-        'SELECT * FROM transactions ORDER BY created_at DESC LIMIT 2000'
+        'SELECT * FROM transactions WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 2000'
+      );
+      return r.rows.map(rowToTx);
+    },
+    async listTrashedTransactions() {
+      const r = await pool.query(
+        'SELECT * FROM transactions WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT 500'
       );
       return r.rows.map(rowToTx);
     },
@@ -125,7 +133,19 @@ if (DATABASE_URL) {
       return rowToTx(r.rows[0]);
     },
     async deleteTransaction(id) {
-      await pool.query('DELETE FROM transactions WHERE id = $1', [id]);
+      // soft delete: keeps the row (recoverable from the Lixeira) instead of
+      // losing the whole day's breakdown to one accidental click
+      await pool.query('UPDATE transactions SET deleted_at = now() WHERE id = $1', [id]);
+    },
+    async restoreTransaction(id) {
+      const r = await pool.query(
+        'UPDATE transactions SET deleted_at = NULL WHERE id = $1 RETURNING *',
+        [id]
+      );
+      return r.rows[0] ? rowToTx(r.rows[0]) : null;
+    },
+    async purgeTransaction(id) {
+      await pool.query('DELETE FROM transactions WHERE id = $1 AND deleted_at IS NOT NULL', [id]);
     },
     async listPending() {
       const r = await pool.query(
@@ -241,8 +261,15 @@ if (DATABASE_URL) {
     },
     async listTransactions() {
       return load()
-        .transactions.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .transactions.filter((t) => !t.deletedAt)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, 2000);
+    },
+    async listTrashedTransactions() {
+      return load()
+        .transactions.filter((t) => t.deletedAt)
+        .sort((a, b) => b.deletedAt.localeCompare(a.deletedAt))
+        .slice(0, 500);
     },
     async addTransaction(t) {
       const data = load();
@@ -253,7 +280,21 @@ if (DATABASE_URL) {
     },
     async deleteTransaction(id) {
       const data = load();
-      data.transactions = data.transactions.filter((t) => t.id !== id);
+      const tx = data.transactions.find((t) => t.id === id);
+      if (tx) tx.deletedAt = new Date().toISOString();
+      save(data);
+    },
+    async restoreTransaction(id) {
+      const data = load();
+      const tx = data.transactions.find((t) => t.id === id);
+      if (!tx) return null;
+      delete tx.deletedAt;
+      save(data);
+      return tx;
+    },
+    async purgeTransaction(id) {
+      const data = load();
+      data.transactions = data.transactions.filter((t) => !(t.id === id && t.deletedAt));
       save(data);
     },
     async listPending() {

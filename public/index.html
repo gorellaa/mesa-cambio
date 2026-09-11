@@ -471,6 +471,12 @@
   table.gancia .lucro-pos{ color:var(--buy); font-weight:700; }
   table.gancia .lucro-neg{ color:var(--sell); font-weight:700; }
   table.gancia .lucro-pend{ color:var(--muted); }
+  table.gancia .restore-btn{
+    border:1px solid var(--buy); background:var(--buy-soft); color:var(--buy);
+    font-size:12px; font-weight:600; padding:6px 12px; border-radius:7px; cursor:pointer;
+  }
+  table.gancia .restore-btn:hover{ opacity:.85; }
+  table.gancia .restore-btn:disabled{ opacity:.5; cursor:default; }
 
   footer.foot{
     margin-top:30px; padding-top:14px; border-top:1px solid var(--line);
@@ -508,6 +514,7 @@
   <nav class="view-tabs">
     <button type="button" class="view-tab on" data-view="painel">Painel</button>
     <button type="button" class="view-tab" data-view="gancia">Histórico Ganância</button>
+    <button type="button" class="view-tab" data-view="lixeira">Lixeira</button>
   </nav>
 
   <div id="painelView">
@@ -547,6 +554,16 @@
     <section>
       <div class="section-head"><h2>Histórico Ganância</h2></div>
       <div class="gancia-wrap" id="ganciaWrap"></div>
+    </section>
+  </div>
+
+  <div id="lixeiraView" hidden>
+    <section>
+      <div class="section-head">
+        <h2>Lixeira</h2>
+        <div class="pb-help" style="margin-bottom:0;">Lançamentos excluídos ficam aqui e podem ser restaurados.</div>
+      </div>
+      <div class="gancia-wrap" id="lixeiraWrap"></div>
     </section>
   </div>
 
@@ -1027,7 +1044,7 @@
 
     Array.prototype.forEach.call(host.querySelectorAll('[data-del]'), function(btn){
       btn.addEventListener('click', function(){
-        if(confirm('Excluir este lançamento?')) deleteTransaction(btn.getAttribute('data-del'));
+        if(confirm('Excluir este lançamento? (vai pra Lixeira, dá pra restaurar depois)')) deleteTransaction(btn.getAttribute('data-del'));
       });
     });
 
@@ -1157,6 +1174,52 @@
     }
   }
 
+  function loadLixeira(){
+    var host = document.getElementById('lixeiraWrap');
+    host.innerHTML = '<div class="empty-note">Carregando…</div>';
+    return api('/transactions/trash').then(function(list){
+      renderLixeira(list);
+    }).catch(function(){
+      host.innerHTML = '<div class="empty-note">Não foi possível carregar a lixeira.</div>';
+    });
+  }
+
+  function renderLixeira(list){
+    var host = document.getElementById('lixeiraWrap');
+    if(!list.length){
+      host.innerHTML = '<div class="empty-note">A lixeira está vazia.</div>';
+      return;
+    }
+    var rowsHtml = list.map(function(t){
+      return '<tr>' +
+        '<td class="num">' + fmtDateBR(t.date) + '</td>' +
+        '<td>' + esc(t.clientName) + '</td>' +
+        '<td><span class="pill ' + (t.tipo==='Compra'?'compra':'venda') + '">' + t.tipo + '</span></td>' +
+        '<td class="num">' + fmtUSD(t.usd) + '</td>' +
+        '<td class="num">' + fmtRate(t.taxa) + '</td>' +
+        '<td class="num">' + fmtBRL(t.brl) + '</td>' +
+        '<td><button type="button" class="restore-btn" data-restore="' + t.id + '">Restaurar</button></td>' +
+      '</tr>';
+    }).join('');
+    host.innerHTML =
+      '<table class="gancia"><thead><tr>' +
+        '<th>Data</th><th>Cliente</th><th>Tipo</th><th>USD</th><th>Taxa</th><th>BRL</th><th></th>' +
+      '</tr></thead><tbody>' + rowsHtml + '</tbody></table>';
+
+    Array.prototype.forEach.call(host.querySelectorAll('[data-restore]'), function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-restore');
+        btn.disabled = true;
+        api('/transactions/'+id+'/restore', {method:'POST'}).then(function(){
+          return Promise.all([loadAll(), loadLixeira()]);
+        }).catch(function(){
+          showBanner('Não foi possível restaurar o lançamento.', true);
+          btn.disabled = false;
+        });
+      });
+    });
+  }
+
   // ---------------- wiring ----------------
 
   Array.prototype.forEach.call(document.querySelectorAll('.view-tab'), function(tab){
@@ -1167,6 +1230,8 @@
       });
       document.getElementById('painelView').hidden = activeView !== 'painel';
       document.getElementById('ganciaView').hidden = activeView !== 'gancia';
+      document.getElementById('lixeiraView').hidden = activeView !== 'lixeira';
+      if(activeView === 'lixeira') loadLixeira();
     });
   });
 

@@ -106,6 +106,24 @@ app.delete('/api/transactions/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/transactions/trash', async (req, res) => {
+  await db.ready;
+  res.json(await db.listTrashedTransactions());
+});
+
+app.post('/api/transactions/:id/restore', async (req, res) => {
+  await db.ready;
+  const tx = await db.restoreTransaction(req.params.id);
+  if (!tx) return res.status(404).json({ error: 'not found in trash' });
+  res.json(tx);
+});
+
+app.delete('/api/transactions/:id/purge', async (req, res) => {
+  await db.ready;
+  await db.purgeTransaction(req.params.id);
+  res.json({ ok: true });
+});
+
 app.get('/api/pending', async (req, res) => {
   await db.ready;
   res.json(await db.listPending());
