@@ -471,6 +471,12 @@
   table.gancia .lucro-pos{ color:var(--buy); font-weight:700; }
   table.gancia .lucro-neg{ color:var(--sell); font-weight:700; }
   table.gancia .lucro-pend{ color:var(--muted); }
+  table.gancia .gancia-note{ font-family:"IBM Plex Sans",sans-serif; font-size:10.5px; color:var(--muted); margin-top:2px; }
+  table.gancia .purge-btn{
+    border:none; background:none; color:var(--muted); font-size:11.5px;
+    text-decoration:underline; cursor:pointer; margin-left:8px;
+  }
+  table.gancia .purge-btn:hover{ color:var(--sell); }
   table.gancia .restore-btn{
     border:1px solid var(--buy); background:var(--buy-soft); color:var(--buy);
     font-size:12px; font-weight:600; padding:6px 12px; border-radius:7px; cursor:pointer;
@@ -561,7 +567,7 @@
     <section>
       <div class="section-head">
         <h2>Lixeira</h2>
-        <div class="pb-help" style="margin-bottom:0;">Lançamentos excluídos ficam aqui e podem ser restaurados.</div>
+        <div class="pb-help" style="margin-bottom:0;">Lançamentos excluídos ficam aqui e podem ser restaurados. Eles continuam contando na Ganância.</div>
       </div>
       <div class="gancia-wrap" id="lixeiraWrap"></div>
     </section>
@@ -582,6 +588,7 @@
   var transactions = [];
   var pending = [];
   var dailyCosts = [];
+  var trashed = [];
   var selectedClientId = null;
   var ledgerDateFilter = null;
   var activeView = 'painel';
@@ -649,12 +656,14 @@
       api('/clients'),
       api('/transactions'),
       api('/pending'),
-      api('/daily-cost')
+      api('/daily-cost'),
+      api('/transactions/trash')
     ]).then(function(res){
       clients = res[0];
       transactions = res[1];
       pending = res[2];
       dailyCosts = res[3];
+      trashed = res[4];
       if(!selectedClientId && clients.length){ selectedClientId = clients[0].id; }
       if(selectedClientId && !clients.some(function(c){return c.id===selectedClientId;})){
         selectedClientId = clients.length ? clients[0].id : null;
@@ -1044,7 +1053,7 @@
 
     Array.prototype.forEach.call(host.querySelectorAll('[data-del]'), function(btn){
       btn.addEventListener('click', function(){
-        if(confirm('Excluir este lançamento? (vai pra Lixeira, dá pra restaurar depois)')) deleteTransaction(btn.getAttribute('data-del'));
+        if(confirm('Excluir este lançamento? (vai pra Lixeira, dá pra restaurar depois, e a Ganância do dia não muda)')) deleteTransaction(btn.getAttribute('data-del'));
       });
     });
 
@@ -1113,30 +1122,27 @@
     var costByDate = {};
     dailyCosts.forEach(function(d){ costByDate[d.date] = d.custo; });
 
+    // A Ganancia e um historico: lancamentos na Lixeira continuam contando,
+    // pra excluir um lancamento nao mudar o lucro que ja foi apurado no dia.
     var byDate = {};
-    transactions.forEach(function(t){
-      if(!byDate[t.date]) byDate[t.date] = { usd:0, brl:0, empty:false };
+    function addTx(t, inTrash){
+      if(!byDate[t.date]) byDate[t.date] = { usd:0, brl:0, empty:false, trashed:0 };
       byDate[t.date].usd += t.usd;
       byDate[t.date].brl += t.brl;
-    });
-    // dias com custo salvo continuam aparecendo mesmo sem lancamentos ativos
-    // (ex: lancamentos na Lixeira), pra nao parecerem perdidos
+      if(inTrash) byDate[t.date].trashed++;
+    }
+    transactions.forEach(function(t){ addTx(t, false); });
+    trashed.forEach(function(t){ addTx(t, true); });
+    // dia com custo salvo mas sem nenhum lancamento continua aparecendo
     Object.keys(costByDate).forEach(function(date){
-      if(!byDate[date]) byDate[date] = { usd:0, brl:0, empty:true };
+      if(!byDate[date]) byDate[date] = { usd:0, brl:0, empty:true, trashed:0 };
     });
     var dates = Object.keys(byDate).sort(function(a,b){ return b.localeCompare(a); });
 
-    var trashHintHtml = '<div class="ledger-filter">' +
-      '<span>Alguns dias estão sem lançamentos ativos. Se você excluiu lançamentos, eles estão na Lixeira.</span>' +
-      '<button type="button" id="goLixeiraBtn">Abrir Lixeira</button>' +
-    '</div>';
-
     if(!dates.length){
-      host.innerHTML = '<div class="empty-note">Nenhum lançamento fechado ativo. Se você excluiu lançamentos, veja a aba Lixeira para restaurar.</div>';
+      host.innerHTML = '<div class="empty-note">Nenhum lançamento fechado ainda.</div>';
       return;
     }
-
-    var anyEmpty = dates.some(function(date){ return byDate[date].empty; });
 
     var rowsHtml = dates.map(function(date){
       var d = byDate[date];
@@ -1150,8 +1156,10 @@
         lucroHtml = '<span class="' + (lucro >= 0 ? 'lucro-pos' : 'lucro-neg') + '">' + fmtBRL(lucro) + '</span>';
       }
       var dash = '<span class="lucro-pend">—</span>';
+      var trashNote = d.trashed
+        ? '<div class="gancia-note">inclui ' + d.trashed + ' na lixeira</div>' : '';
       return '<tr>' +
-        '<td class="num">' + fmtDateBR(date) + '</td>' +
+        '<td class="num">' + fmtDateBR(date) + trashNote + '</td>' +
         '<td class="num">' + (d.empty ? dash : fmtUSD(d.usd)) + '</td>' +
         '<td class="num">' + (d.empty ? dash : fmtBRL(d.brl)) + '</td>' +
         '<td class="num">' + (d.empty ? dash : fmtRate(rate)) + '</td>' +
@@ -1161,17 +1169,9 @@
     }).join('');
 
     host.innerHTML =
-      (anyEmpty ? trashHintHtml : '') +
       '<table class="gancia"><thead><tr>' +
         '<th>Data</th><th>Total USD</th><th>Total BRL (receita)</th><th>Taxa média</th><th>Meu custo (R$)</th><th>Lucro</th>' +
       '</tr></thead><tbody>' + rowsHtml + '</tbody></table>';
-
-    var goLixeira = host.querySelector('#goLixeiraBtn');
-    if(goLixeira){
-      goLixeira.addEventListener('click', function(){
-        document.querySelector('.view-tab[data-view="lixeira"]').click();
-      });
-    }
 
     Array.prototype.forEach.call(host.querySelectorAll('.custo-input'), function(input){
       function commit(){
@@ -1219,7 +1219,8 @@
         '<td class="num">' + fmtUSD(t.usd) + '</td>' +
         '<td class="num">' + fmtRate(t.taxa) + '</td>' +
         '<td class="num">' + fmtBRL(t.brl) + '</td>' +
-        '<td><button type="button" class="restore-btn" data-restore="' + t.id + '">Restaurar</button></td>' +
+        '<td><button type="button" class="restore-btn" data-restore="' + t.id + '">Restaurar</button>' +
+          '<button type="button" class="purge-btn" data-purge="' + t.id + '">Excluir de vez</button></td>' +
       '</tr>';
     }).join('');
     host.innerHTML =
@@ -1239,6 +1240,19 @@
       }).catch(function(){
         showBanner('Não foi possível restaurar os lançamentos.', true);
         loadLixeira();
+      });
+    });
+
+    Array.prototype.forEach.call(host.querySelectorAll('[data-purge]'), function(btn){
+      btn.addEventListener('click', function(){
+        if(!confirm('Excluir DE VEZ este lançamento?\n\nEle também sai da Ganância e NÃO dá pra desfazer.')) return;
+        btn.disabled = true;
+        api('/transactions/'+btn.getAttribute('data-purge')+'/purge', {method:'DELETE'}).then(function(){
+          return Promise.all([loadAll(), loadLixeira()]);
+        }).catch(function(){
+          showBanner('Não foi possível excluir o lançamento.', true);
+          btn.disabled = false;
+        });
       });
     });
 
