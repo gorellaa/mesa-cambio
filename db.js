@@ -147,6 +147,10 @@ if (DATABASE_URL) {
     async purgeTransaction(id) {
       await pool.query('DELETE FROM transactions WHERE id = $1 AND deleted_at IS NOT NULL', [id]);
     },
+    async restoreAllTransactions() {
+      const r = await pool.query('UPDATE transactions SET deleted_at = NULL WHERE deleted_at IS NOT NULL');
+      return r.rowCount;
+    },
     async listPending() {
       const r = await pool.query(
         'SELECT * FROM pending ORDER BY created_at ASC LIMIT 2000'
@@ -296,6 +300,18 @@ if (DATABASE_URL) {
       const data = load();
       data.transactions = data.transactions.filter((t) => !(t.id === id && t.deletedAt));
       save(data);
+    },
+    async restoreAllTransactions() {
+      const data = load();
+      let n = 0;
+      data.transactions.forEach((t) => {
+        if (t.deletedAt) {
+          delete t.deletedAt;
+          n++;
+        }
+      });
+      save(data);
+      return n;
     },
     async listPending() {
       return load().pending.sort((a, b) => a.createdAt.localeCompare(b.createdAt));

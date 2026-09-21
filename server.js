@@ -111,6 +111,11 @@ app.get('/api/transactions/trash', async (req, res) => {
   res.json(await db.listTrashedTransactions());
 });
 
+app.post('/api/transactions/restore-all', async (req, res) => {
+  await db.ready;
+  res.json({ restored: await db.restoreAllTransactions() });
+});
+
 app.post('/api/transactions/:id/restore', async (req, res) => {
   await db.ready;
   const tx = await db.restoreTransaction(req.params.id);

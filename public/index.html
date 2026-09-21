@@ -1110,47 +1110,68 @@
     var editingSelStart = editingDate ? active.selectionStart : null;
     var editingSelEnd = editingDate ? active.selectionEnd : null;
 
-    var byDate = {};
-    transactions.forEach(function(t){
-      if(!byDate[t.date]) byDate[t.date] = { usd:0, brl:0 };
-      byDate[t.date].usd += t.usd;
-      byDate[t.date].brl += t.brl;
-    });
-    var dates = Object.keys(byDate).sort(function(a,b){ return b.localeCompare(a); });
-
-    if(!dates.length){
-      host.innerHTML = '<div class="empty-note">Nenhum lançamento fechado ainda.</div>';
-      return;
-    }
-
     var costByDate = {};
     dailyCosts.forEach(function(d){ costByDate[d.date] = d.custo; });
 
+    var byDate = {};
+    transactions.forEach(function(t){
+      if(!byDate[t.date]) byDate[t.date] = { usd:0, brl:0, empty:false };
+      byDate[t.date].usd += t.usd;
+      byDate[t.date].brl += t.brl;
+    });
+    // dias com custo salvo continuam aparecendo mesmo sem lancamentos ativos
+    // (ex: lancamentos na Lixeira), pra nao parecerem perdidos
+    Object.keys(costByDate).forEach(function(date){
+      if(!byDate[date]) byDate[date] = { usd:0, brl:0, empty:true };
+    });
+    var dates = Object.keys(byDate).sort(function(a,b){ return b.localeCompare(a); });
+
+    var trashHintHtml = '<div class="ledger-filter">' +
+      '<span>Alguns dias estão sem lançamentos ativos. Se você excluiu lançamentos, eles estão na Lixeira.</span>' +
+      '<button type="button" id="goLixeiraBtn">Abrir Lixeira</button>' +
+    '</div>';
+
+    if(!dates.length){
+      host.innerHTML = '<div class="empty-note">Nenhum lançamento fechado ativo. Se você excluiu lançamentos, veja a aba Lixeira para restaurar.</div>';
+      return;
+    }
+
+    var anyEmpty = dates.some(function(date){ return byDate[date].empty; });
+
     var rowsHtml = dates.map(function(date){
       var d = byDate[date];
-      var rate = d.usd ? d.brl/d.usd : 0;
       var custo = costByDate[date];
+      var rate = d.usd ? d.brl/d.usd : 0;
       var lucroHtml;
-      if(custo == null){
+      if(custo == null || d.empty){
         lucroHtml = '<span class="lucro-pend">—</span>';
       } else {
         var lucro = Math.round((d.brl - d.usd*custo) * 100) / 100;
         lucroHtml = '<span class="' + (lucro >= 0 ? 'lucro-pos' : 'lucro-neg') + '">' + fmtBRL(lucro) + '</span>';
       }
+      var dash = '<span class="lucro-pend">—</span>';
       return '<tr>' +
         '<td class="num">' + fmtDateBR(date) + '</td>' +
-        '<td class="num">' + fmtUSD(d.usd) + '</td>' +
-        '<td class="num">' + fmtBRL(d.brl) + '</td>' +
-        '<td class="num">' + fmtRate(rate) + '</td>' +
+        '<td class="num">' + (d.empty ? dash : fmtUSD(d.usd)) + '</td>' +
+        '<td class="num">' + (d.empty ? dash : fmtBRL(d.brl)) + '</td>' +
+        '<td class="num">' + (d.empty ? dash : fmtRate(rate)) + '</td>' +
         '<td><input type="number" step="0.0001" min="0" inputmode="decimal" class="num custo-input" data-date="' + date + '" placeholder="0,0000" value="' + (custo != null ? custo : '') + '"></td>' +
         '<td class="num">' + lucroHtml + '</td>' +
       '</tr>';
     }).join('');
 
     host.innerHTML =
+      (anyEmpty ? trashHintHtml : '') +
       '<table class="gancia"><thead><tr>' +
         '<th>Data</th><th>Total USD</th><th>Total BRL (receita)</th><th>Taxa média</th><th>Meu custo (R$)</th><th>Lucro</th>' +
       '</tr></thead><tbody>' + rowsHtml + '</tbody></table>';
+
+    var goLixeira = host.querySelector('#goLixeiraBtn');
+    if(goLixeira){
+      goLixeira.addEventListener('click', function(){
+        document.querySelector('.view-tab[data-view="lixeira"]').click();
+      });
+    }
 
     Array.prototype.forEach.call(host.querySelectorAll('.custo-input'), function(input){
       function commit(){
@@ -1202,9 +1223,24 @@
       '</tr>';
     }).join('');
     host.innerHTML =
+      '<div class="ledger-filter">' +
+        '<span><strong>' + list.length + '</strong> lançamento' + (list.length===1?'':'s') + ' na lixeira</span>' +
+        '<button type="button" id="restoreAllBtn">Restaurar todos</button>' +
+      '</div>' +
       '<table class="gancia"><thead><tr>' +
         '<th>Data</th><th>Cliente</th><th>Tipo</th><th>USD</th><th>Taxa</th><th>BRL</th><th></th>' +
       '</tr></thead><tbody>' + rowsHtml + '</tbody></table>';
+
+    host.querySelector('#restoreAllBtn').addEventListener('click', function(){
+      if(!confirm('Restaurar todos os ' + list.length + ' lançamentos da lixeira?')) return;
+      this.disabled = true;
+      api('/transactions/restore-all', {method:'POST'}).then(function(){
+        return Promise.all([loadAll(), loadLixeira()]);
+      }).catch(function(){
+        showBanner('Não foi possível restaurar os lançamentos.', true);
+        loadLixeira();
+      });
+    });
 
     Array.prototype.forEach.call(host.querySelectorAll('[data-restore]'), function(btn){
       btn.addEventListener('click', function(){
