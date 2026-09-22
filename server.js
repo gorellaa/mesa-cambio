@@ -207,6 +207,66 @@ app.put('/api/daily-cost/:date', async (req, res) => {
   res.json(await db.setDailyCost(date, custo));
 });
 
+app.get('/api/contracts', async (req, res) => {
+  await db.ready;
+  res.json(await db.listContracts());
+});
+
+app.post('/api/contracts', async (req, res) => {
+  await db.ready;
+  const { clientId, clientName, tipo, totalUsd, taxa, date, obs } = req.body;
+  const totalUsdNum = Number(totalUsd);
+  const taxaNum = Number(taxa);
+  if (
+    !clientId ||
+    !clientName ||
+    (tipo !== 'Compra' && tipo !== 'Venda') ||
+    !(totalUsdNum > 0) ||
+    !(taxaNum > 0) ||
+    !date
+  ) {
+    return res.status(400).json({ error: 'invalid contract' });
+  }
+  const contract = await db.addContract({
+    clientId,
+    clientName,
+    tipo,
+    totalUsd: totalUsdNum,
+    taxa: taxaNum,
+    date,
+    obs: (obs || '').slice(0, 500),
+  });
+  res.json(contract);
+});
+
+app.delete('/api/contracts/:id', async (req, res) => {
+  await db.ready;
+  const ok = await db.deleteContract(req.params.id);
+  if (!ok) return res.status(400).json({ error: 'contract has movements' });
+  res.json({ ok: true });
+});
+
+app.post('/api/contracts/:id/movements', async (req, res) => {
+  await db.ready;
+  const { kind, valor, obs } = req.body;
+  const valorNum = Number(valor);
+  if ((kind !== 'usd' && kind !== 'brl') || !(valorNum > 0)) {
+    return res.status(400).json({ error: 'invalid movement' });
+  }
+  const movement = await db.addContractMovement(req.params.id, {
+    kind,
+    valor: valorNum,
+    obs: (obs || '').slice(0, 500),
+  });
+  res.json(movement);
+});
+
+app.delete('/api/contract-movements/:id', async (req, res) => {
+  await db.ready;
+  await db.deleteContractMovement(req.params.id);
+  res.json({ ok: true });
+});
+
 app.get(/^(?!\/api\/).*/, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });

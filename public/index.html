@@ -310,6 +310,74 @@
   .submit-btn:hover{ opacity:.92; }
   .submit-btn:disabled{ opacity:.6; cursor:default; }
 
+  .contracts-section{ margin-bottom:20px; }
+  .contracts-section .cs-title{ font-size:13px; font-weight:700; margin-bottom:2px; }
+  .contracts-section .cs-help{ font-size:11.5px; color:var(--muted); margin-bottom:10px; }
+  form.contract-new{
+    display:grid; grid-template-columns:repeat(6,1fr); gap:10px; align-items:end;
+    margin-bottom:14px; padding:14px; background:var(--paper);
+    border:1px solid var(--line); border-radius:var(--radius);
+  }
+  @media (max-width:640px){ form.contract-new{ grid-template-columns:1fr 1fr; } }
+  form.contract-new .submit-btn{ grid-column:span 6; }
+  @media (max-width:640px){ form.contract-new .submit-btn{ grid-column:span 2; } }
+  .contract-card{
+    background:var(--paper-2); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); padding:14px 16px; margin-bottom:12px;
+    border-left:4px solid var(--muted);
+  }
+  .contract-card.tipo-compra{ border-left-color:var(--buy); }
+  .contract-card.tipo-venda{ border-left-color:var(--sell); }
+  .contract-card.quitado{ opacity:.6; }
+  .contract-head{
+    display:flex; justify-content:space-between; align-items:flex-start;
+    flex-wrap:wrap; gap:10px; margin-bottom:12px;
+  }
+  .contract-head .ch-main{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .contract-head .ch-total{ font-size:14px; font-weight:700; font-family:"IBM Plex Mono",monospace; }
+  .contract-head .ch-sub{ font-size:11.5px; color:var(--muted); margin-top:2px; }
+  .contract-head .ch-del{
+    border:1px solid var(--line); background:var(--paper); color:var(--muted);
+    font-size:11px; padding:4px 8px; border-radius:7px; cursor:pointer;
+  }
+  .contract-head .ch-del:hover{ color:var(--sell); border-color:var(--sell); }
+  .contract-head .ch-del:disabled{ opacity:.4; cursor:default; }
+  .quitado-badge{
+    font-size:11px; font-weight:700; color:var(--buy); background:var(--buy-soft);
+    padding:2px 8px; border-radius:999px;
+  }
+  .saldo-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px; }
+  @media (max-width:520px){ .saldo-grid{ grid-template-columns:1fr; } }
+  .saldo-tile{
+    background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:10px 12px;
+  }
+  .saldo-tile .st-label{ font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-bottom:4px; }
+  .saldo-tile .st-val{ font-family:"IBM Plex Mono",monospace; font-size:17px; font-weight:700; }
+  .saldo-tile .st-val.saldo-ok{ color:var(--buy); }
+  .saldo-tile .st-val.saldo-pend{ color:var(--amber-ink); }
+  @media (prefers-color-scheme:dark){ .saldo-tile .st-val.saldo-pend{ color:var(--amber); } }
+  :root[data-theme="dark"] .saldo-tile .st-val.saldo-pend{ color:var(--amber); }
+  .saldo-tile form{ display:flex; gap:6px; margin-top:8px; }
+  .saldo-tile input{
+    flex:1; min-width:0; font-family:"IBM Plex Mono",monospace; font-size:12.5px;
+    padding:6px 8px; border:1px solid var(--line); border-radius:6px;
+    background:var(--paper-2); color:var(--ink);
+  }
+  .saldo-tile button{
+    border:none; background:var(--ink); color:var(--paper); font-size:11.5px;
+    font-weight:600; padding:0 10px; border-radius:6px; cursor:pointer; white-space:nowrap;
+  }
+  .contract-movs{ font-size:11.5px; color:var(--muted); }
+  .contract-movs .cm-row{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:3px 0; border-bottom:1px dashed var(--rule);
+  }
+  .contract-movs .cm-row:last-child{ border-bottom:none; }
+  .contract-movs button{
+    border:none; background:none; color:var(--muted); cursor:pointer; font-size:12px; padding:0 4px;
+  }
+  .contract-movs button:hover{ color:var(--sell); }
+
   .pending-box{
     margin-bottom:20px; padding:14px; background:var(--amber-soft);
     border:1px solid var(--amber); border-radius:var(--radius);
@@ -605,6 +673,7 @@
   var pending = [];
   var dailyCosts = [];
   var trashed = [];
+  var contracts = [];
   var selectedClientId = null;
   var ledgerDateFilter = null;
   var activeView = 'painel';
@@ -673,13 +742,15 @@
       api('/transactions'),
       api('/pending'),
       api('/daily-cost'),
-      api('/transactions/trash')
+      api('/transactions/trash'),
+      api('/contracts')
     ]).then(function(res){
       clients = res[0];
       transactions = res[1];
       pending = res[2];
       dailyCosts = res[3];
       trashed = res[4];
+      contracts = res[5];
       if(!selectedClientId && clients.length){ selectedClientId = clients[0].id; }
       if(selectedClientId && !clients.some(function(c){return c.id===selectedClientId;})){
         selectedClientId = clients.length ? clients[0].id : null;
@@ -731,6 +802,32 @@
       body: JSON.stringify({clientId:clientId, clientName:clientName, sourceTipo:sourceTipo, targetTipo:targetTipo, taxa:taxa, date:date, obs:obs})
     }).then(loadAll).catch(function(){
       showBanner('Não foi possível fechar os valores pendentes.', true);
+    });
+  }
+  function addContract(clientId, clientName, tipo, totalUsd, taxa, date, obs){
+    return api('/contracts', {
+      method:'POST',
+      body: JSON.stringify({clientId:clientId, clientName:clientName, tipo:tipo, totalUsd:totalUsd, taxa:taxa, date:date, obs:obs})
+    }).then(loadAll).catch(function(){
+      showBanner('Não foi possível criar o contrato.', true);
+    });
+  }
+  function deleteContract(id){
+    return api('/contracts/'+id, {method:'DELETE'}).then(loadAll).catch(function(){
+      showBanner('Não foi possível remover o contrato.', true);
+    });
+  }
+  function addContractMovement(contractId, kind, valor){
+    return api('/contracts/'+contractId+'/movements', {
+      method:'POST',
+      body: JSON.stringify({kind:kind, valor:valor})
+    }).then(loadAll).catch(function(){
+      showBanner('Não foi possível registrar o valor.', true);
+    });
+  }
+  function deleteContractMovement(id){
+    return api('/contract-movements/'+id, {method:'DELETE'}).then(loadAll).catch(function(){
+      showBanner('Não foi possível remover o registro.', true);
     });
   }
   function deleteClient(id){
@@ -846,6 +943,51 @@
     });
   }
 
+  // preserva o campo que o usuario esta editando quando um poll re-renderiza
+  // no meio (o innerHTML e recriado do zero a cada render, o que apagaria
+  // o que estivesse sendo digitado nesse instante)
+  function inputSelector(el){
+    if(el.id) return '#' + el.id;
+    var form = el.closest('form[data-contract]');
+    if(form){
+      return 'form[data-contract="' + form.getAttribute('data-contract') + '"][data-kind="' + form.getAttribute('data-kind') + '"] input';
+    }
+    return null;
+  }
+  // Captura o valor de TODOS os campos preenchidos dentro do host (nao so o
+  // que esta focado), porque o innerHTML e recriado do zero a cada poll —
+  // um campo que perdeu o foco (ex: o usuario clicou no proximo campo)
+  // tambem seria apagado se nao guardassemos o valor dele aqui.
+  function captureFormState(host){
+    var values = {};
+    Array.prototype.forEach.call(host.querySelectorAll('input, textarea'), function(el){
+      if(!el.value) return;
+      var sel = inputSelector(el);
+      if(sel) values[sel] = el.value;
+    });
+    var active = document.activeElement;
+    var focused = null;
+    if(active && host.contains(active) && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')){
+      var sel = inputSelector(active);
+      if(sel) focused = { selector: sel, selStart: active.selectionStart, selEnd: active.selectionEnd };
+    }
+    return { values: values, focused: focused };
+  }
+  function restoreFormState(host, saved){
+    if(!saved) return;
+    Object.keys(saved.values).forEach(function(sel){
+      var el = host.querySelector(sel);
+      if(el && !el.value) el.value = saved.values[sel];
+    });
+    if(saved.focused){
+      var el = host.querySelector(saved.focused.selector);
+      if(el){
+        el.focus();
+        try { el.setSelectionRange(saved.focused.selStart, saved.focused.selEnd); } catch(e){}
+      }
+    }
+  }
+
   function renderWorkpane(){
     var host = document.getElementById('workpane');
     var client = clients.find(function(c){ return c.id === selectedClientId; });
@@ -853,6 +995,7 @@
       host.innerHTML = '<div class="no-client"><div>Selecione um cliente à esquerda,<br>ou adicione o primeiro para começar.</div></div>';
       return;
     }
+    var savedFormState = captureFormState(host);
     var s = clientStats(client.id);
     var allRows = s.list.slice().sort(function(a,b){ return (b.createdAt||'').localeCompare(a.createdAt||''); });
     var rows = ledgerDateFilter ? allRows.filter(function(t){ return t.date === ledgerDateFilter; }) : allRows;
@@ -877,6 +1020,69 @@
         '</td>' +
       '</tr>';
     }).join('') : '';
+
+    var clientContracts = contracts.filter(function(c){ return c.clientId === client.id; });
+    var contractCardsHtml = clientContracts.map(function(c){
+      var usdMoved = c.movements.filter(function(m){ return m.kind==='usd'; }).reduce(function(s,m){ return s+m.valor; }, 0);
+      var brlMoved = c.movements.filter(function(m){ return m.kind==='brl'; }).reduce(function(s,m){ return s+m.valor; }, 0);
+      var saldoUsd = Math.round((c.totalUsd - usdMoved) * 100) / 100;
+      var saldoBrl = Math.round((brlMoved - c.totalBrl) * 100) / 100;
+      var quitado = Math.abs(saldoUsd) < 0.005 && Math.abs(saldoBrl) < 0.005;
+      var usdLabel = c.tipo === 'Compra' ? 'Saldo USDT (falta enviar)' : 'Saldo USDT (falta receber)';
+      var brlLabel = c.tipo === 'Compra' ? 'Saldo Reais (falta receber)' : 'Saldo Reais (falta enviar)';
+      var movsHtml = c.movements.slice().reverse().map(function(m){
+        return '<div class="cm-row"><span>' + (m.kind==='usd' ? fmtUSD(m.valor) : fmtBRL(m.valor)) +
+          ' · ' + fmtDateBR(m.createdAt.slice(0,10)) + '</span>' +
+          '<button type="button" data-delmov="' + m.id + '" title="Remover">✕</button></div>';
+      }).join('');
+      return '<div class="contract-card tipo-' + (c.tipo==='Compra'?'compra':'venda') + (quitado?' quitado':'') + '">' +
+        '<div class="contract-head">' +
+          '<div class="ch-main">' +
+            '<span class="pill ' + (c.tipo==='Compra'?'compra':'venda') + '">' + c.tipo + '</span>' +
+            '<span class="ch-total num">' + fmtUSD(c.totalUsd) + ' · ' + fmtRate(c.taxa) + ' · ' + fmtBRL(c.totalBrl) + '</span>' +
+            (quitado ? '<span class="quitado-badge">Quitado ✓</span>' : '') +
+          '</div>' +
+          '<div>' +
+            '<span class="ch-sub">' + fmtDateBR(c.date) + '</span> ' +
+            '<button type="button" class="ch-del" data-delcontract="' + c.id + '"' + (c.movements.length ? ' disabled title="Só remove contrato sem movimentos"' : ' title="Remover contrato"') + '>Remover</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="saldo-grid">' +
+          '<div class="saldo-tile">' +
+            '<div class="st-label">' + usdLabel + '</div>' +
+            '<div class="st-val num ' + (Math.abs(saldoUsd)<0.005?'saldo-ok':'saldo-pend') + '">' + fmtUSD(saldoUsd) + '</div>' +
+            '<form class="mov-form" data-contract="' + c.id + '" data-kind="usd">' +
+              '<input type="number" step="0.01" min="0" inputmode="decimal" placeholder="0,00" required>' +
+              '<button type="submit">Registrar</button>' +
+            '</form>' +
+          '</div>' +
+          '<div class="saldo-tile">' +
+            '<div class="st-label">' + brlLabel + '</div>' +
+            '<div class="st-val num ' + (Math.abs(saldoBrl)<0.005?'saldo-ok':'saldo-pend') + '">' + fmtBRL(saldoBrl) + '</div>' +
+            '<form class="mov-form" data-contract="' + c.id + '" data-kind="brl">' +
+              '<input type="number" step="0.01" min="0" inputmode="decimal" placeholder="0,00" required>' +
+              '<button type="submit">Registrar</button>' +
+            '</form>' +
+          '</div>' +
+        '</div>' +
+        (c.movements.length ? '<div class="contract-movs">' + movsHtml + '</div>' : '') +
+      '</div>';
+    }).join('');
+
+    var contractsBoxHtml =
+      '<div class="contracts-section">' +
+        '<div class="cs-title">Contratos</div>' +
+        '<div class="cs-help">Fecha um total (USDT × taxa = Reais) e vai abatendo os dois lados conforme envia/recebe.</div>' +
+        '<form class="contract-new" id="contractNewForm">' +
+          '<div class="field"><label>Tipo</label><div class="seg"><button type="button" class="on compra" data-tipo="Compra">Compra</button><button type="button" class="venda" data-tipo="Venda">Venda</button></div></div>' +
+          '<div class="field"><label for="ctrUsd">Valor USDT</label><input type="number" step="0.01" min="0" inputmode="decimal" id="ctrUsd" class="num" placeholder="0,00" required></div>' +
+          '<div class="field"><label for="ctrTaxa">Taxa (R$)</label><input type="number" step="0.0001" min="0" inputmode="decimal" id="ctrTaxa" class="num" placeholder="0,0000" required></div>' +
+          '<div class="field"><label for="ctrDate">Data</label><input type="date" id="ctrDate" value="' + summaryDate + '" required></div>' +
+          '<div class="field brl-preview"><label>Total BRL</label><div class="pv num" id="ctrPreview">R$ 0,00</div></div>' +
+          '<button type="submit" class="submit-btn">Criar contrato</button>' +
+        '</form>' +
+        contractCardsHtml +
+      '</div>';
 
     var pendingGroups = clientPendingGroups(client.id);
     var pendingGroupsHtml = ['Compra','Venda','__unclassified__'].map(function(key){
@@ -929,6 +1135,8 @@
         '</div>' +
         '<div class="rate-readout"><div class="rl">Taxa média</div><div class="rv num">' + (s.list.length? fmtRate(s.rate) : '—') + '</div></div>' +
       '</div>' +
+
+      contractsBoxHtml +
 
       pendingBoxHtml +
 
@@ -1024,6 +1232,57 @@
       });
     });
 
+    var contractNewForm = host.querySelector('#contractNewForm');
+    var contractTipoState = 'Compra';
+    var contractSegBtns = contractNewForm.querySelectorAll('.seg button');
+    Array.prototype.forEach.call(contractSegBtns, function(b){
+      b.addEventListener('click', function(){
+        contractTipoState = b.getAttribute('data-tipo');
+        Array.prototype.forEach.call(contractSegBtns, function(x){ x.classList.toggle('on', x===b); });
+      });
+    });
+    var ctrUsdEl = contractNewForm.querySelector('#ctrUsd');
+    var ctrTaxaEl = contractNewForm.querySelector('#ctrTaxa');
+    var ctrPreviewEl = contractNewForm.querySelector('#ctrPreview');
+    function updateCtrPreview(){
+      var u = parseFloat(ctrUsdEl.value) || 0;
+      var t = parseFloat(ctrTaxaEl.value) || 0;
+      ctrPreviewEl.textContent = fmtBRL(u*t);
+    }
+    ctrUsdEl.addEventListener('input', updateCtrPreview);
+    ctrTaxaEl.addEventListener('input', updateCtrPreview);
+    contractNewForm.addEventListener('submit', function(ev){
+      ev.preventDefault();
+      var totalUsd = parseFloat(ctrUsdEl.value);
+      var taxa = parseFloat(ctrTaxaEl.value);
+      var date = contractNewForm.querySelector('#ctrDate').value || summaryDate;
+      if(!(totalUsd > 0) || !(taxa > 0)) return;
+      addContract(client.id, client.name, contractTipoState, totalUsd, taxa, date, '');
+    });
+
+    Array.prototype.forEach.call(host.querySelectorAll('.mov-form'), function(form){
+      form.addEventListener('submit', function(ev){
+        ev.preventDefault();
+        var input = form.querySelector('input');
+        var valor = parseFloat(input.value);
+        if(!(valor > 0)) return;
+        addContractMovement(form.getAttribute('data-contract'), form.getAttribute('data-kind'), valor);
+      });
+    });
+
+    Array.prototype.forEach.call(host.querySelectorAll('[data-delmov]'), function(btn){
+      btn.addEventListener('click', function(){
+        if(confirm('Remover este registro?')) deleteContractMovement(btn.getAttribute('data-delmov'));
+      });
+    });
+
+    Array.prototype.forEach.call(host.querySelectorAll('[data-delcontract]'), function(btn){
+      btn.addEventListener('click', function(){
+        if(btn.disabled) return;
+        if(confirm('Remover este contrato?')) deleteContract(btn.getAttribute('data-delcontract'));
+      });
+    });
+
     var pendingAddForm = host.querySelector('#pendingAddForm');
     var pendingTipoState = 'Compra';
     var pendingSegBtns = pendingAddForm.querySelectorAll('.seg button');
@@ -1087,6 +1346,12 @@
         renderWorkpane();
       });
     }
+
+    restoreFormState(host, savedFormState);
+
+    // recalcula os previews (Valor BRL / Total BRL) com os valores restaurados
+    updatePreview();
+    updateCtrPreview();
   }
 
   function openReceipt(tx){

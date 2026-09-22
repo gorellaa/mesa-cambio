@@ -84,7 +84,52 @@ if (DATABASE_URL) {
       custo DOUBLE PRECISION NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS contracts (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      client_name TEXT NOT NULL,
+      tipo TEXT NOT NULL,
+      total_usd DOUBLE PRECISION NOT NULL,
+      taxa DOUBLE PRECISION NOT NULL,
+      total_brl DOUBLE PRECISION NOT NULL,
+      date TEXT NOT NULL,
+      obs TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS contract_movements (
+      id TEXT PRIMARY KEY,
+      contract_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      valor DOUBLE PRECISION NOT NULL,
+      obs TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
   })();
+
+  function rowToContract(r) {
+    return {
+      id: r.id,
+      clientId: r.client_id,
+      clientName: r.client_name,
+      tipo: r.tipo,
+      totalUsd: Number(r.total_usd),
+      taxa: Number(r.taxa),
+      totalBrl: Number(r.total_brl),
+      date: r.date,
+      obs: r.obs || '',
+      createdAt: r.created_at,
+    };
+  }
+  function rowToMovement(r) {
+    return {
+      id: r.id,
+      contractId: r.contract_id,
+      kind: r.kind,
+      valor: Number(r.valor),
+      obs: r.obs || '',
+      createdAt: r.created_at,
+    };
+  }
 
   impl = {
     ready,
@@ -217,6 +262,53 @@ if (DATABASE_URL) {
       );
       return { date: r.rows[0].date, custo: Number(r.rows[0].custo) };
     },
+    async listContracts() {
+      const [cRes, mRes] = await Promise.all([
+        pool.query('SELECT * FROM contracts ORDER BY created_at DESC'),
+        pool.query('SELECT * FROM contract_movements ORDER BY created_at ASC'),
+      ]);
+      const movementsByContract = {};
+      mRes.rows.forEach((row) => {
+        const m = rowToMovement(row);
+        (movementsByContract[m.contractId] = movementsByContract[m.contractId] || []).push(m);
+      });
+      return cRes.rows.map((row) => {
+        const c = rowToContract(row);
+        c.movements = movementsByContract[c.id] || [];
+        return c;
+      });
+    },
+    async addContract(c) {
+      const id = crypto.randomUUID();
+      const totalBrl = Math.round(c.totalUsd * c.taxa * 100) / 100;
+      const r = await pool.query(
+        `INSERT INTO contracts
+          (id, client_id, client_name, tipo, total_usd, taxa, total_brl, date, obs)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+        [id, c.clientId, c.clientName, c.tipo, c.totalUsd, c.taxa, totalBrl, c.date, c.obs || '']
+      );
+      const contract = rowToContract(r.rows[0]);
+      contract.movements = [];
+      return contract;
+    },
+    async deleteContract(id) {
+      const mRes = await pool.query('SELECT 1 FROM contract_movements WHERE contract_id = $1 LIMIT 1', [id]);
+      if (mRes.rows.length) return false;
+      await pool.query('DELETE FROM contracts WHERE id = $1', [id]);
+      return true;
+    },
+    async addContractMovement(contractId, m) {
+      const id = crypto.randomUUID();
+      const r = await pool.query(
+        `INSERT INTO contract_movements (id, contract_id, kind, valor, obs)
+         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+        [id, contractId, m.kind, m.valor, m.obs || '']
+      );
+      return rowToMovement(r.rows[0]);
+    },
+    async deleteContractMovement(id) {
+      await pool.query('DELETE FROM contract_movements WHERE id = $1', [id]);
+    },
   };
 } else {
   // Local development fallback only: a JSON file next to this script.
@@ -229,9 +321,11 @@ if (DATABASE_URL) {
       const data = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       if (!data.pending) data.pending = [];
       if (!data.dailyCosts) data.dailyCosts = [];
+      if (!data.contracts) data.contracts = [];
+      if (!data.contractMovements) data.contractMovements = [];
       return data;
     } catch (e) {
-      return { clients: [], transactions: [], pending: [], dailyCosts: [] };
+      return { clients: [], transactions: [], pending: [], dailyCosts: [], contracts: [], contractMovements: [] };
     }
   }
   function save(data) {
@@ -371,6 +465,64 @@ if (DATABASE_URL) {
       else data.dailyCosts.push({ date, custo });
       save(data);
       return { date, custo };
+    },
+    async listContracts() {
+      const data = load();
+      return data.contracts
+        .slice()
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .map((c) => ({
+          ...c,
+          movements: data.contractMovements
+            .filter((m) => m.contractId === c.id)
+            .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+        }));
+    },
+    async addContract(c) {
+      const data = load();
+      const totalBrl = Math.round(c.totalUsd * c.taxa * 100) / 100;
+      const contract = {
+        id: crypto.randomUUID(),
+        clientId: c.clientId,
+        clientName: c.clientName,
+        tipo: c.tipo,
+        totalUsd: c.totalUsd,
+        taxa: c.taxa,
+        totalBrl,
+        date: c.date,
+        obs: c.obs || '',
+        createdAt: new Date().toISOString(),
+      };
+      data.contracts.push(contract);
+      save(data);
+      return { ...contract, movements: [] };
+    },
+    async deleteContract(id) {
+      const data = load();
+      const hasMovements = data.contractMovements.some((m) => m.contractId === id);
+      if (hasMovements) return false;
+      data.contracts = data.contracts.filter((c) => c.id !== id);
+      save(data);
+      return true;
+    },
+    async addContractMovement(contractId, m) {
+      const data = load();
+      const movement = {
+        id: crypto.randomUUID(),
+        contractId,
+        kind: m.kind,
+        valor: m.valor,
+        obs: m.obs || '',
+        createdAt: new Date().toISOString(),
+      };
+      data.contractMovements.push(movement);
+      save(data);
+      return movement;
+    },
+    async deleteContractMovement(id) {
+      const data = load();
+      data.contractMovements = data.contractMovements.filter((m) => m.id !== id);
+      save(data);
     },
   };
 }
