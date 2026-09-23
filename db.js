@@ -309,6 +309,37 @@ if (DATABASE_URL) {
     async deleteContractMovement(id) {
       await pool.query('DELETE FROM contract_movements WHERE id = $1', [id]);
     },
+    async applyPendingToContract({ clientId, sourceTipo, contractId }) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const sumR = await client.query(
+          'SELECT COALESCE(SUM(usd),0) AS total FROM pending WHERE client_id = $1 AND tipo IS NOT DISTINCT FROM $2',
+          [clientId, sourceTipo || null]
+        );
+        const valor = Math.round(Number(sumR.rows[0].total) * 100) / 100;
+        if (!(valor > 0)) {
+          await client.query('ROLLBACK');
+          return null;
+        }
+        const id = crypto.randomUUID();
+        const movR = await client.query(
+          `INSERT INTO contract_movements (id, contract_id, kind, valor) VALUES ($1,$2,'brl',$3) RETURNING *`,
+          [id, contractId, valor]
+        );
+        await client.query(
+          'DELETE FROM pending WHERE client_id = $1 AND tipo IS NOT DISTINCT FROM $2',
+          [clientId, sourceTipo || null]
+        );
+        await client.query('COMMIT');
+        return rowToMovement(movR.rows[0]);
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
   };
 } else {
   // Local development fallback only: a JSON file next to this script.
@@ -523,6 +554,25 @@ if (DATABASE_URL) {
       const data = load();
       data.contractMovements = data.contractMovements.filter((m) => m.id !== id);
       save(data);
+    },
+    async applyPendingToContract({ clientId, sourceTipo, contractId }) {
+      const data = load();
+      const src = sourceTipo || null;
+      const matching = data.pending.filter((p) => p.clientId === clientId && (p.tipo || null) === src);
+      const valor = Math.round(matching.reduce((s, p) => s + p.brl, 0) * 100) / 100;
+      if (!(valor > 0)) return null;
+      const movement = {
+        id: crypto.randomUUID(),
+        contractId,
+        kind: 'brl',
+        valor,
+        obs: '',
+        createdAt: new Date().toISOString(),
+      };
+      data.contractMovements.push(movement);
+      data.pending = data.pending.filter((p) => !(p.clientId === clientId && (p.tipo || null) === src));
+      save(data);
+      return movement;
     },
   };
 }

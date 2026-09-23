@@ -192,6 +192,25 @@ app.post('/api/pending/close', async (req, res) => {
   res.json(tx);
 });
 
+app.post('/api/pending/apply-to-contract', async (req, res) => {
+  await db.ready;
+  const { clientId, sourceTipo, contractId } = req.body;
+  if (
+    !clientId ||
+    !contractId ||
+    (sourceTipo != null && sourceTipo !== 'Compra' && sourceTipo !== 'Venda')
+  ) {
+    return res.status(400).json({ error: 'invalid apply request' });
+  }
+  const movement = await db.applyPendingToContract({
+    clientId,
+    sourceTipo: sourceTipo || null,
+    contractId,
+  });
+  if (!movement) return res.status(400).json({ error: 'no pending amount for this client/tipo' });
+  res.json(movement);
+});
+
 app.get('/api/daily-cost', async (req, res) => {
   await db.ready;
   res.json(await db.listDailyCosts());

@@ -426,6 +426,20 @@
     border:none; background:var(--ink); color:var(--paper); font-weight:700;
     font-size:13px; padding:8px 16px; border-radius:7px; cursor:pointer;
   }
+  form.pending-apply{
+    display:flex; gap:8px; align-items:end; flex-wrap:wrap;
+    margin-top:10px; padding-top:10px; border-top:1px dashed var(--line);
+  }
+  form.pending-apply .field{ min-width:220px; flex:1; }
+  form.pending-apply select{
+    width:100%; font-family:inherit; font-size:13px; padding:8px 9px;
+    border:1px solid var(--line); border-radius:7px;
+    background:var(--paper-2); color:var(--ink);
+  }
+  form.pending-apply .apply-btn{
+    border:1px solid var(--buy); background:var(--buy-soft); color:var(--buy);
+    font-weight:700; font-size:13px; padding:8px 16px; border-radius:7px; cursor:pointer; white-space:nowrap;
+  }
 
   .receipt-btn{
     border:none; background:none; color:var(--amber-ink); cursor:pointer;
@@ -830,6 +844,14 @@
       showBanner('Não foi possível remover o registro.', true);
     });
   }
+  function applyPendingToContract(clientId, sourceTipo, contractId){
+    return api('/pending/apply-to-contract', {
+      method:'POST',
+      body: JSON.stringify({clientId:clientId, sourceTipo:sourceTipo, contractId:contractId})
+    }).then(loadAll).catch(function(){
+      showBanner('Não foi possível aplicar o valor no contrato.', true);
+    });
+  }
   function deleteClient(id){
     return api('/clients/'+id, {method:'DELETE'}).then(function(){
       if(selectedClientId===id) selectedClientId = null;
@@ -1021,13 +1043,19 @@
       '</tr>';
     }).join('') : '';
 
-    var clientContracts = contracts.filter(function(c){ return c.clientId === client.id; });
-    var contractCardsHtml = clientContracts.map(function(c){
+    var clientContracts = contracts.filter(function(c){ return c.clientId === client.id; }).map(function(c){
       var usdMoved = c.movements.filter(function(m){ return m.kind==='usd'; }).reduce(function(s,m){ return s+m.valor; }, 0);
       var brlMoved = c.movements.filter(function(m){ return m.kind==='brl'; }).reduce(function(s,m){ return s+m.valor; }, 0);
       var saldoUsd = Math.round((c.totalUsd - usdMoved) * 100) / 100;
       var saldoBrl = Math.round((brlMoved - c.totalBrl) * 100) / 100;
       var quitado = Math.abs(saldoUsd) < 0.005 && Math.abs(saldoBrl) < 0.005;
+      return Object.assign({}, c, { saldoUsd: saldoUsd, saldoBrl: saldoBrl, quitado: quitado });
+    });
+    // contratos que ainda tem reais a receber (falta abater) — sao os que
+    // aparecem como opcao pra "aplicar" um valor pendente confirmado
+    var openBrlContracts = clientContracts.filter(function(c){ return !c.quitado && Math.abs(c.saldoBrl) > 0.005; });
+    var contractCardsHtml = clientContracts.map(function(c){
+      var saldoUsd = c.saldoUsd, saldoBrl = c.saldoBrl, quitado = c.quitado;
       var usdLabel = c.tipo === 'Compra' ? 'Saldo USDT (falta enviar)' : 'Saldo USDT (falta receber)';
       var brlLabel = c.tipo === 'Compra' ? 'Saldo Reais (falta receber)' : 'Saldo Reais (falta enviar)';
       var movsHtml = c.movements.slice().reverse().map(function(m){
@@ -1098,6 +1126,17 @@
       var tipoPickerHtml = isUnclassified ?
         '<div class="field"><label>Tipo</label><div class="seg"><button type="button" class="on compra" data-tipo="Compra">Compra</button><button type="button" class="venda" data-tipo="Venda">Venda</button></div></div>' : '';
       var closeLabel = isUnclassified ? 'Fechar' : ('Fechar ' + g.tipo.toLowerCase());
+      var applyHtml = openBrlContracts.length ?
+        '<form class="pending-apply" data-source-tipo="' + (g.tipo||'') + '">' +
+          '<div class="field"><label>ou aplicar num contrato aberto</label>' +
+            '<select class="apply-select">' +
+              openBrlContracts.map(function(oc){
+                return '<option value="' + oc.id + '">' + fmtUSD(oc.totalUsd) + ' · falta ' + fmtBRL(Math.abs(oc.saldoBrl)) + ' (' + fmtDateBR(oc.date) + ')</option>';
+              }).join('') +
+            '</select>' +
+          '</div>' +
+          '<button type="submit" class="apply-btn">Aplicar ' + fmtBRL(g.total) + '</button>' +
+        '</form>' : '';
       return '<div class="pending-group" data-tipo="' + (g.tipo||'') + '">' +
         '<div class="pending-items">' + itemsHtml + '</div>' +
         '<div class="pending-total">' + titleHtml + '<span class="pt-val num">' + fmtBRL(g.total) + '</span></div>' +
@@ -1107,6 +1146,7 @@
           '<div class="field"><label>Data</label><input type="date" class="pc-date" value="' + summaryDate + '" required></div>' +
           '<button type="submit" class="close-btn">' + closeLabel + '</button>' +
         '</form>' +
+        applyHtml +
       '</div>';
     }).join('');
 
@@ -1323,6 +1363,16 @@
         var date = closeForm.querySelector('.pc-date').value || summaryDate;
         if(!(taxa > 0) || !targetTipo) return;
         closePending(client.id, client.name, sourceTipo, targetTipo, taxa, date, '');
+      });
+    });
+
+    Array.prototype.forEach.call(host.querySelectorAll('form.pending-apply'), function(applyForm){
+      applyForm.addEventListener('submit', function(ev){
+        ev.preventDefault();
+        var sourceTipo = applyForm.getAttribute('data-source-tipo') || null;
+        var contractId = applyForm.querySelector('.apply-select').value;
+        if(!contractId) return;
+        applyPendingToContract(client.id, sourceTipo, contractId);
       });
     });
 
