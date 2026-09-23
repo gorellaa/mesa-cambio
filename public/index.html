@@ -1077,6 +1077,7 @@
           '</div>' +
           '<div>' +
             '<span class="ch-sub">' + fmtDateBR(c.date) + '</span> ' +
+            '<button type="button" class="receipt-btn" data-contract-receipt="' + c.id + '" title="Ver comprovante de pagamentos">🧾</button> ' +
             '<button type="button" class="ch-del" data-delcontract="' + c.id + '"' + (c.movements.length ? ' disabled title="Só remove contrato sem movimentos"' : ' title="Remover contrato"') + '>Remover</button>' +
           '</div>' +
         '</div>' +
@@ -1332,6 +1333,13 @@
       });
     });
 
+    Array.prototype.forEach.call(host.querySelectorAll('[data-contract-receipt]'), function(btn){
+      btn.addEventListener('click', function(){
+        var contract = clientContracts.find(function(c){ return c.id === btn.getAttribute('data-contract-receipt'); });
+        if(contract) openContractReceipt(contract);
+      });
+    });
+
     var pendingAddForm = host.querySelector('#pendingAddForm');
     var pendingTipoState = 'Compra';
     var pendingSegBtns = pendingAddForm.querySelectorAll('.seg button');
@@ -1427,6 +1435,41 @@
         '<div class="rt-row"><span>Total enviado</span><span class="num">' + fmtBRL(tx.brl) + '</span></div>' +
         '<div class="rt-row"><span>Taxa fechada</span><span class="num">' + fmtRate(tx.taxa) + '</span></div>' +
         '<div class="rt-row grand"><span>Total em USD</span><span class="num">' + fmtUSD(tx.usd) + '</span></div>' +
+      '</div>' +
+      '<button type="button" class="receipt-close" id="receiptCloseBtn">Fechar</button>';
+    document.getElementById('receiptOverlay').hidden = false;
+    document.getElementById('receiptCloseBtn').addEventListener('click', closeReceipt);
+  }
+
+  function fmtTimeBR(iso){
+    var d = new Date(iso);
+    if(isNaN(d)) return '';
+    var h = String(d.getHours()).padStart(2,'0');
+    var m = String(d.getMinutes()).padStart(2,'0');
+    return h + ':' + m;
+  }
+
+  function openContractReceipt(contract){
+    var card = document.getElementById('receiptCard');
+    var pagamentos = contract.movements
+      .filter(function(m){ return m.kind === 'brl'; })
+      .slice()
+      .sort(function(a,b){ return a.createdAt.localeCompare(b.createdAt); });
+    var totalRecebido = Math.round(pagamentos.reduce(function(s,m){ return s+m.valor; }, 0) * 100) / 100;
+    var saldoBrl = Math.round((totalRecebido - contract.totalBrl) * 100) / 100;
+    var itemsHtml = pagamentos.length ? pagamentos.map(function(m, i){
+      return '<li><span class="ri-n">' + (i+1) + '.</span><span class="num">' + fmtBRL(m.valor) +
+        ' · ' + fmtDateBR(m.createdAt.slice(0,10)) + ' ' + fmtTimeBR(m.createdAt) + '</span></li>';
+    }).join('') : '<li><span class="ri-n">—</span><span class="num">Nenhum pagamento registrado ainda</span></li>';
+    card.innerHTML =
+      '<div class="rc-brand">Mesa de Câmbio · Comprovante de Pagamentos</div>' +
+      '<h3>' + esc(contract.clientName) + '</h3>' +
+      '<div class="rc-sub">Contrato ' + contract.tipo + ' · ' + fmtUSD(contract.totalUsd) + ' · ' + fmtDateBR(contract.date) + ' · ' + pagamentos.length + ' pagamento' + (pagamentos.length===1?'':'s') + '</div>' +
+      '<ul class="receipt-list">' + itemsHtml + '</ul>' +
+      '<div class="receipt-totals">' +
+        '<div class="rt-row"><span>Total recebido</span><span class="num">' + fmtBRL(totalRecebido) + '</span></div>' +
+        '<div class="rt-row"><span>Total do contrato</span><span class="num">' + fmtBRL(contract.totalBrl) + '</span></div>' +
+        '<div class="rt-row grand"><span>Falta receber</span><span class="num">' + fmtBRL(Math.abs(Math.min(saldoBrl,0))) + '</span></div>' +
       '</div>' +
       '<button type="button" class="receipt-close" id="receiptCloseBtn">Fechar</button>';
     document.getElementById('receiptOverlay').hidden = false;
