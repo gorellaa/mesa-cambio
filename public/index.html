@@ -351,6 +351,15 @@
     font-size:11px; font-weight:700; color:var(--buy); background:var(--buy-soft);
     padding:2px 8px; border-radius:999px;
   }
+  .ch-fechamentos{ margin-bottom:12px; }
+  .ch-fechamento{
+    font-size:11px; color:var(--muted); font-family:"IBM Plex Mono",monospace;
+    padding:2px 0; display:flex; align-items:center; gap:6px;
+  }
+  .ch-fdel{
+    border:none; background:none; color:var(--muted); cursor:pointer; font-size:11px; padding:0 2px;
+  }
+  .ch-fdel:hover{ color:var(--sell); }
   .saldo-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px; }
   @media (max-width:520px){ .saldo-grid{ grid-template-columns:1fr; } }
   .saldo-tile{
@@ -807,7 +816,7 @@
       method:'POST',
       body: JSON.stringify({clientId:clientId, clientName:clientName, tipo:tipo, brl:brl, obs:obs})
     }).then(function(result){
-      if(result && result.appliedToContractId){
+      if(result && result.appliedToContracts){
         showBanner(fmtBRL(brl) + ' aplicado direto no contrato aberto.', false);
       }
       return loadAll();
@@ -841,10 +850,10 @@
       showBanner('Não foi possível remover o contrato.', true);
     });
   }
-  function addContractMovement(contractId, kind, valor){
-    return api('/contracts/'+contractId+'/movements', {
+  function addContractMovement(clientId, tipo, kind, valor){
+    return api('/clients/'+clientId+'/contract-movements', {
       method:'POST',
-      body: JSON.stringify({kind:kind, valor:valor})
+      body: JSON.stringify({tipo:tipo, kind:kind, valor:valor})
     }).then(loadAll).catch(function(){
       showBanner('Não foi possível registrar o valor.', true);
     });
@@ -854,10 +863,10 @@
       showBanner('Não foi possível remover o registro.', true);
     });
   }
-  function applyPendingToContract(clientId, sourceTipo, contractId){
+  function applyPendingToContract(clientId, sourceTipo, targetTipo){
     return api('/pending/apply-to-contract', {
       method:'POST',
-      body: JSON.stringify({clientId:clientId, sourceTipo:sourceTipo, contractId:contractId})
+      body: JSON.stringify({clientId:clientId, sourceTipo:sourceTipo, targetTipo:targetTipo})
     }).then(loadAll).catch(function(){
       showBanner('Não foi possível aplicar o valor no contrato.', true);
     });
@@ -980,9 +989,9 @@
   // o que estivesse sendo digitado nesse instante)
   function inputSelector(el){
     if(el.id) return '#' + el.id;
-    var form = el.closest('form[data-contract]');
+    var form = el.closest('form.mov-form[data-tipo]');
     if(form){
-      return 'form[data-contract="' + form.getAttribute('data-contract') + '"][data-kind="' + form.getAttribute('data-kind') + '"] input';
+      return 'form[data-tipo="' + form.getAttribute('data-tipo') + '"][data-kind="' + form.getAttribute('data-kind') + '"] input';
     }
     return null;
   }
@@ -1053,48 +1062,65 @@
       '</tr>';
     }).join('') : '';
 
-    var clientContracts = contracts.filter(function(c){ return c.clientId === client.id; }).map(function(c){
-      var usdMoved = c.movements.filter(function(m){ return m.kind==='usd'; }).reduce(function(s,m){ return s+m.valor; }, 0);
-      var brlMoved = c.movements.filter(function(m){ return m.kind==='brl'; }).reduce(function(s,m){ return s+m.valor; }, 0);
-      var saldoUsd = Math.round((c.totalUsd - usdMoved) * 100) / 100;
-      var saldoBrl = Math.round((brlMoved - c.totalBrl) * 100) / 100;
+    var clientContracts = contracts.filter(function(c){ return c.clientId === client.id; });
+
+    // agrupa os contratos do cliente por tipo (Compra/Venda): pode ter feito
+    // varias compras em taxas diferentes (a taxa varia a cada minuto), mas
+    // quer ver tudo somado — quanto falta pagar e quanto falta receber no
+    // total — com cada fechamento individual só como referência pequena
+    var contractGroups = ['Compra','Venda'].map(function(tipo){
+      var list = clientContracts.filter(function(c){ return c.tipo === tipo; });
+      if(!list.length) return null;
+      list = list.slice().sort(function(a,b){ return (a.date+a.createdAt).localeCompare(b.date+b.createdAt); });
+      var allMovs = [];
+      list.forEach(function(c){ c.movements.forEach(function(m){ allMovs.push(m); }); });
+      var totalUsd = list.reduce(function(s,c){ return s+c.totalUsd; }, 0);
+      var totalBrl = list.reduce(function(s,c){ return s+c.totalBrl; }, 0);
+      var usdMoved = allMovs.filter(function(m){ return m.kind==='usd'; }).reduce(function(s,m){ return s+m.valor; }, 0);
+      var brlMoved = allMovs.filter(function(m){ return m.kind==='brl'; }).reduce(function(s,m){ return s+m.valor; }, 0);
+      var saldoUsd = Math.round((totalUsd - usdMoved) * 100) / 100;
+      var saldoBrl = Math.round((brlMoved - totalBrl) * 100) / 100;
       var quitado = Math.abs(saldoUsd) < 0.005 && Math.abs(saldoBrl) < 0.005;
-      return Object.assign({}, c, { saldoUsd: saldoUsd, saldoBrl: saldoBrl, quitado: quitado });
-    });
-    // contratos que ainda tem reais a receber (falta abater) — sao os que
+      return { tipo: tipo, contracts: list, movements: allMovs, totalUsd: totalUsd, totalBrl: totalBrl, saldoUsd: saldoUsd, saldoBrl: saldoBrl, quitado: quitado };
+    }).filter(Boolean);
+    // grupos que ainda tem reais a receber (falta abater) — sao os que
     // aparecem como opcao pra "aplicar" um valor pendente confirmado
-    var openBrlContracts = clientContracts.filter(function(c){ return !c.quitado && Math.abs(c.saldoBrl) > 0.005; });
-    // com exatamente 1 contrato aberto, tudo que chega ja cai direto nele
+    var openBrlGroups = contractGroups.filter(function(g){ return !g.quitado && Math.abs(g.saldoBrl) > 0.005; });
+    // com exatamente 1 grupo aberto, tudo que chega ja cai direto nele
     // (ver /api/pending no server) — entao esconde as outras formas de
     // lancar valor pra nao poluir a tela com opcoes que nao fazem nada novo
-    var hasOneOpenContract = openBrlContracts.length === 1;
-    var contractCardsHtml = clientContracts.map(function(c){
-      var saldoUsd = c.saldoUsd, saldoBrl = c.saldoBrl, quitado = c.quitado;
-      var usdLabel = c.tipo === 'Compra' ? 'Saldo USDT (falta enviar)' : 'Saldo USDT (falta receber)';
-      var brlLabel = c.tipo === 'Compra' ? 'Saldo Reais (falta receber)' : 'Saldo Reais (falta enviar)';
-      var movsHtml = c.movements.slice().reverse().map(function(m){
+    var hasOneOpenContract = openBrlGroups.length === 1;
+    var contractCardsHtml = contractGroups.map(function(g){
+      var saldoUsd = g.saldoUsd, saldoBrl = g.saldoBrl, quitado = g.quitado;
+      var usdLabel = g.tipo === 'Compra' ? 'Saldo USDT (falta enviar)' : 'Saldo USDT (falta receber)';
+      var brlLabel = g.tipo === 'Compra' ? 'Saldo Reais (falta receber)' : 'Saldo Reais (falta enviar)';
+      var fechamentosHtml = g.contracts.map(function(c){
+        return '<div class="ch-fechamento">' +
+          '<span>' + fmtUSD(c.totalUsd) + ' · ' + fmtRate(c.taxa) + ' · ' + fmtBRL(c.totalBrl) + ' · ' + fmtDateBR(c.date) + '</span>' +
+          (c.movements.length ? '' : '<button type="button" class="ch-fdel" data-delcontract="' + c.id + '" title="Remover este fechamento">✕</button>') +
+        '</div>';
+      }).join('');
+      var movsHtml = g.movements.slice().sort(function(a,b){ return b.createdAt.localeCompare(a.createdAt); }).map(function(m){
         return '<div class="cm-row"><span>' + (m.kind==='usd' ? fmtUSD(m.valor) : fmtBRL(m.valor)) +
           ' · ' + fmtDateBR(m.createdAt.slice(0,10)) + '</span>' +
           '<button type="button" data-delmov="' + m.id + '" title="Remover">✕</button></div>';
       }).join('');
-      return '<div class="contract-card tipo-' + (c.tipo==='Compra'?'compra':'venda') + (quitado?' quitado':'') + '">' +
+      return '<div class="contract-card tipo-' + (g.tipo==='Compra'?'compra':'venda') + (quitado?' quitado':'') + '">' +
         '<div class="contract-head">' +
           '<div class="ch-main">' +
-            '<span class="pill ' + (c.tipo==='Compra'?'compra':'venda') + '">' + c.tipo + '</span>' +
-            '<span class="ch-total num">' + fmtUSD(c.totalUsd) + ' · ' + fmtRate(c.taxa) + ' · ' + fmtBRL(c.totalBrl) + '</span>' +
+            '<span class="pill ' + (g.tipo==='Compra'?'compra':'venda') + '">' + g.tipo + '</span>' +
             (quitado ? '<span class="quitado-badge">Quitado ✓</span>' : '') +
           '</div>' +
           '<div>' +
-            '<span class="ch-sub">' + fmtDateBR(c.date) + '</span> ' +
-            '<button type="button" class="receipt-btn" data-contract-receipt="' + c.id + '" title="Ver comprovante de pagamentos">🧾</button> ' +
-            '<button type="button" class="ch-del" data-delcontract="' + c.id + '"' + (c.movements.length ? ' disabled title="Só remove contrato sem movimentos"' : ' title="Remover contrato"') + '>Remover</button>' +
+            '<button type="button" class="receipt-btn" data-group-receipt="' + g.tipo + '" title="Ver comprovante de pagamentos">🧾</button>' +
           '</div>' +
         '</div>' +
+        '<div class="ch-fechamentos">' + fechamentosHtml + '</div>' +
         '<div class="saldo-grid">' +
           '<div class="saldo-tile">' +
             '<div class="st-label">' + usdLabel + '</div>' +
             '<div class="st-val num ' + (Math.abs(saldoUsd)<0.005?'saldo-ok':'saldo-pend') + '">' + fmtUSD(saldoUsd) + '</div>' +
-            '<form class="mov-form" data-contract="' + c.id + '" data-kind="usd">' +
+            '<form class="mov-form" data-tipo="' + g.tipo + '" data-kind="usd">' +
               '<input type="number" step="0.01" min="0" inputmode="decimal" placeholder="0,00" required>' +
               '<button type="submit">Registrar</button>' +
             '</form>' +
@@ -1102,13 +1128,13 @@
           '<div class="saldo-tile">' +
             '<div class="st-label">' + brlLabel + '</div>' +
             '<div class="st-val num ' + (Math.abs(saldoBrl)<0.005?'saldo-ok':'saldo-pend') + '">' + fmtBRL(saldoBrl) + '</div>' +
-            '<form class="mov-form" data-contract="' + c.id + '" data-kind="brl">' +
+            '<form class="mov-form" data-tipo="' + g.tipo + '" data-kind="brl">' +
               '<input type="number" step="0.01" min="0" inputmode="decimal" placeholder="0,00" required>' +
               '<button type="submit">Registrar</button>' +
             '</form>' +
           '</div>' +
         '</div>' +
-        (c.movements.length ? '<div class="contract-movs">' + movsHtml + '</div>' : '') +
+        (g.movements.length ? '<div class="contract-movs">' + movsHtml + '</div>' : '') +
       '</div>';
     }).join('');
 
@@ -1141,12 +1167,12 @@
       var tipoPickerHtml = isUnclassified ?
         '<div class="field"><label>Tipo</label><div class="seg"><button type="button" class="on compra" data-tipo="Compra">Compra</button><button type="button" class="venda" data-tipo="Venda">Venda</button></div></div>' : '';
       var closeLabel = isUnclassified ? 'Fechar' : ('Fechar ' + g.tipo.toLowerCase());
-      var applyHtml = openBrlContracts.length ?
+      var applyHtml = openBrlGroups.length ?
         '<form class="pending-apply" data-source-tipo="' + (g.tipo||'') + '">' +
           '<div class="field"><label>ou aplicar num contrato aberto</label>' +
             '<select class="apply-select">' +
-              openBrlContracts.map(function(oc){
-                return '<option value="' + oc.id + '">' + fmtUSD(oc.totalUsd) + ' · falta ' + fmtBRL(Math.abs(oc.saldoBrl)) + ' (' + fmtDateBR(oc.date) + ')</option>';
+              openBrlGroups.map(function(og){
+                return '<option value="' + og.tipo + '">' + og.tipo + ' · falta ' + fmtBRL(Math.abs(og.saldoBrl)) + '</option>';
               }).join('') +
             '</select>' +
           '</div>' +
@@ -1169,7 +1195,7 @@
       '<div class="pending-box">' +
         '<div class="pb-title">Valores pendentes</div>' +
         '<div class="pb-help">' + (
-          openBrlContracts.length === 1
+          openBrlGroups.length === 1
             ? 'Tem um contrato aberto: cada valor confirmado já desconta direto do saldo dele, sem precisar fechar nada aqui.'
             : 'Some os valores conforme o cliente for mandando ao longo do dia. No final, feche com a taxa combinada.'
         ) + '</div>' +
@@ -1335,7 +1361,7 @@
         var input = form.querySelector('input');
         var valor = parseFloat(input.value);
         if(!(valor > 0)) return;
-        addContractMovement(form.getAttribute('data-contract'), form.getAttribute('data-kind'), valor);
+        addContractMovement(client.id, form.getAttribute('data-tipo'), form.getAttribute('data-kind'), valor);
       });
     });
 
@@ -1352,10 +1378,10 @@
       });
     });
 
-    Array.prototype.forEach.call(host.querySelectorAll('[data-contract-receipt]'), function(btn){
+    Array.prototype.forEach.call(host.querySelectorAll('[data-group-receipt]'), function(btn){
       btn.addEventListener('click', function(){
-        var contract = clientContracts.find(function(c){ return c.id === btn.getAttribute('data-contract-receipt'); });
-        if(contract) openContractReceipt(contract);
+        var group = contractGroups.find(function(g){ return g.tipo === btn.getAttribute('data-group-receipt'); });
+        if(group) openContractGroupReceipt(group);
       });
     });
 
@@ -1408,9 +1434,9 @@
       applyForm.addEventListener('submit', function(ev){
         ev.preventDefault();
         var sourceTipo = applyForm.getAttribute('data-source-tipo') || null;
-        var contractId = applyForm.querySelector('.apply-select').value;
-        if(!contractId) return;
-        applyPendingToContract(client.id, sourceTipo, contractId);
+        var targetTipo = applyForm.querySelector('.apply-select').value;
+        if(!targetTipo) return;
+        applyPendingToContract(client.id, sourceTipo, targetTipo);
       });
     });
 
@@ -1470,26 +1496,27 @@
     return h + ':' + m;
   }
 
-  function openContractReceipt(contract){
+  function openContractGroupReceipt(group){
     var card = document.getElementById('receiptCard');
-    var pagamentos = contract.movements
+    var pagamentos = group.movements
       .filter(function(m){ return m.kind === 'brl'; })
       .slice()
       .sort(function(a,b){ return a.createdAt.localeCompare(b.createdAt); });
     var totalRecebido = Math.round(pagamentos.reduce(function(s,m){ return s+m.valor; }, 0) * 100) / 100;
-    var saldoBrl = Math.round((totalRecebido - contract.totalBrl) * 100) / 100;
+    var saldoBrl = Math.round((totalRecebido - group.totalBrl) * 100) / 100;
+    var clientName = group.contracts[0].clientName;
     var itemsHtml = pagamentos.length ? pagamentos.map(function(m, i){
       return '<li><span class="ri-n">' + (i+1) + '.</span><span class="num">' + fmtBRL(m.valor) +
         ' · ' + fmtDateBR(m.createdAt.slice(0,10)) + ' ' + fmtTimeBR(m.createdAt) + '</span></li>';
     }).join('') : '<li><span class="ri-n">—</span><span class="num">Nenhum pagamento registrado ainda</span></li>';
     card.innerHTML =
       '<div class="rc-brand">Mesa de Câmbio · Comprovante de Pagamentos</div>' +
-      '<h3>' + esc(contract.clientName) + '</h3>' +
-      '<div class="rc-sub">Contrato ' + contract.tipo + ' · ' + fmtUSD(contract.totalUsd) + ' · ' + fmtDateBR(contract.date) + ' · ' + pagamentos.length + ' pagamento' + (pagamentos.length===1?'':'s') + '</div>' +
+      '<h3>' + esc(clientName) + '</h3>' +
+      '<div class="rc-sub">' + group.tipo + ' · ' + fmtUSD(group.totalUsd) + ' · ' + pagamentos.length + ' pagamento' + (pagamentos.length===1?'':'s') + '</div>' +
       '<ul class="receipt-list">' + itemsHtml + '</ul>' +
       '<div class="receipt-totals">' +
         '<div class="rt-row"><span>Total recebido</span><span class="num">' + fmtBRL(totalRecebido) + '</span></div>' +
-        '<div class="rt-row"><span>Total do contrato</span><span class="num">' + fmtBRL(contract.totalBrl) + '</span></div>' +
+        '<div class="rt-row"><span>Total combinado</span><span class="num">' + fmtBRL(group.totalBrl) + '</span></div>' +
         '<div class="rt-row grand"><span>Falta receber</span><span class="num">' + fmtBRL(Math.abs(Math.min(saldoBrl,0))) + '</span></div>' +
       '</div>' +
       '<button type="button" class="receipt-close" id="receiptCloseBtn">Fechar</button>';

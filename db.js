@@ -37,6 +37,32 @@ function rowToPending(r) {
   };
 }
 
+// Divide um valor (BRL confirmado, ou USDT enviado) entre uma lista de
+// contratos do mesmo cliente/tipo, do mais antigo pro mais novo, preenchendo
+// primeiro o que falta em cada um antes de passar pro proximo. Isso e o que
+// permite mostrar varios fechamentos (cada um com sua propria taxa) como um
+// unico saldo somado: o dinheiro que entra abate o fechamento mais antigo
+// primeiro. Sobra (se o valor for maior que tudo que falta) cai no ultimo.
+function allocateAcrossContracts(contracts, movedByContract, kind, valor) {
+  let remaining = Math.round(valor * 100) / 100;
+  const allocations = [];
+  contracts.forEach((c) => {
+    if (remaining <= 0.005) return;
+    const moved = movedByContract[c.id] || { usd: 0, brl: 0 };
+    const totalField = kind === 'usd' ? c.totalUsd : c.totalBrl;
+    const cap = Math.round((totalField - (moved[kind] || 0)) * 100) / 100;
+    if (cap <= 0.005) return;
+    const alloc = Math.min(cap, remaining);
+    allocations.push({ contractId: c.id, kind, valor: alloc });
+    remaining = Math.round((remaining - alloc) * 100) / 100;
+  });
+  if (remaining > 0.005 && contracts.length) {
+    const last = contracts[contracts.length - 1];
+    allocations.push({ contractId: last.id, kind, valor: remaining });
+  }
+  return allocations;
+}
+
 let impl;
 
 if (DATABASE_URL) {
@@ -129,6 +155,20 @@ if (DATABASE_URL) {
       obs: r.obs || '',
       createdAt: r.created_at,
     };
+  }
+  async function loadMovedTotals(client, contractIds) {
+    if (!contractIds.length) return {};
+    const mRes = await client.query(
+      `SELECT contract_id, kind, COALESCE(SUM(valor),0) AS total FROM contract_movements
+       WHERE contract_id = ANY($1) GROUP BY contract_id, kind`,
+      [contractIds]
+    );
+    const map = {};
+    mRes.rows.forEach((r) => {
+      map[r.contract_id] = map[r.contract_id] || { usd: 0, brl: 0 };
+      map[r.contract_id][r.kind] = Number(r.total);
+    });
+    return map;
   }
 
   impl = {
@@ -297,19 +337,47 @@ if (DATABASE_URL) {
       await pool.query('DELETE FROM contracts WHERE id = $1', [id]);
       return true;
     },
-    async addContractMovement(contractId, m) {
-      const id = crypto.randomUUID();
-      const r = await pool.query(
-        `INSERT INTO contract_movements (id, contract_id, kind, valor, obs)
-         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-        [id, contractId, m.kind, m.valor, m.obs || '']
-      );
-      return rowToMovement(r.rows[0]);
-    },
     async deleteContractMovement(id) {
       await pool.query('DELETE FROM contract_movements WHERE id = $1', [id]);
     },
-    async applyPendingToContract({ clientId, sourceTipo, contractId }) {
+    async addAggregateMovement({ clientId, tipo, kind, valor }) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const cRes = await client.query(
+          'SELECT * FROM contracts WHERE client_id = $1 AND tipo = $2 ORDER BY date ASC, created_at ASC',
+          [clientId, tipo]
+        );
+        if (!cRes.rows.length) {
+          await client.query('ROLLBACK');
+          return [];
+        }
+        const movedByContract = await loadMovedTotals(client, cRes.rows.map((r) => r.id));
+        const allocations = allocateAcrossContracts(
+          cRes.rows.map((r) => ({ id: r.id, totalUsd: Number(r.total_usd), totalBrl: Number(r.total_brl) })),
+          movedByContract,
+          kind,
+          valor
+        );
+        const created = [];
+        for (const a of allocations) {
+          const id = crypto.randomUUID();
+          const r = await client.query(
+            `INSERT INTO contract_movements (id, contract_id, kind, valor) VALUES ($1,$2,$3,$4) RETURNING *`,
+            [id, a.contractId, a.kind, a.valor]
+          );
+          created.push(rowToMovement(r.rows[0]));
+        }
+        await client.query('COMMIT');
+        return created;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
+    async applyPendingToContractGroup({ clientId, sourceTipo, targetTipo }) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
@@ -322,17 +390,36 @@ if (DATABASE_URL) {
           await client.query('ROLLBACK');
           return null;
         }
-        const id = crypto.randomUUID();
-        const movR = await client.query(
-          `INSERT INTO contract_movements (id, contract_id, kind, valor) VALUES ($1,$2,'brl',$3) RETURNING *`,
-          [id, contractId, valor]
+        const cRes = await client.query(
+          'SELECT * FROM contracts WHERE client_id = $1 AND tipo = $2 ORDER BY date ASC, created_at ASC',
+          [clientId, targetTipo]
         );
+        if (!cRes.rows.length) {
+          await client.query('ROLLBACK');
+          return null;
+        }
+        const movedByContract = await loadMovedTotals(client, cRes.rows.map((r) => r.id));
+        const allocations = allocateAcrossContracts(
+          cRes.rows.map((r) => ({ id: r.id, totalUsd: Number(r.total_usd), totalBrl: Number(r.total_brl) })),
+          movedByContract,
+          'brl',
+          valor
+        );
+        const created = [];
+        for (const a of allocations) {
+          const id = crypto.randomUUID();
+          const r = await client.query(
+            `INSERT INTO contract_movements (id, contract_id, kind, valor) VALUES ($1,$2,'brl',$3) RETURNING *`,
+            [id, a.contractId, a.valor]
+          );
+          created.push(rowToMovement(r.rows[0]));
+        }
         await client.query(
           'DELETE FROM pending WHERE client_id = $1 AND tipo IS NOT DISTINCT FROM $2',
           [clientId, sourceTipo || null]
         );
         await client.query('COMMIT');
-        return rowToMovement(movR.rows[0]);
+        return created;
       } catch (e) {
         await client.query('ROLLBACK');
         throw e;
@@ -536,43 +623,71 @@ if (DATABASE_URL) {
       save(data);
       return true;
     },
-    async addContractMovement(contractId, m) {
-      const data = load();
-      const movement = {
-        id: crypto.randomUUID(),
-        contractId,
-        kind: m.kind,
-        valor: m.valor,
-        obs: m.obs || '',
-        createdAt: new Date().toISOString(),
-      };
-      data.contractMovements.push(movement);
-      save(data);
-      return movement;
-    },
     async deleteContractMovement(id) {
       const data = load();
       data.contractMovements = data.contractMovements.filter((m) => m.id !== id);
       save(data);
     },
-    async applyPendingToContract({ clientId, sourceTipo, contractId }) {
+    async addAggregateMovement({ clientId, tipo, kind, valor }) {
+      const data = load();
+      const cList = data.contracts
+        .filter((c) => c.clientId === clientId && c.tipo === tipo)
+        .sort((a, b) => (a.date + a.createdAt).localeCompare(b.date + b.createdAt));
+      if (!cList.length) return [];
+      const movedByContract = {};
+      data.contractMovements.forEach((m) => {
+        if (!cList.some((c) => c.id === m.contractId)) return;
+        movedByContract[m.contractId] = movedByContract[m.contractId] || { usd: 0, brl: 0 };
+        movedByContract[m.contractId][m.kind] += m.valor;
+      });
+      const allocations = allocateAcrossContracts(cList, movedByContract, kind, valor);
+      const created = allocations.map((a) => {
+        const movement = {
+          id: crypto.randomUUID(),
+          contractId: a.contractId,
+          kind: a.kind,
+          valor: a.valor,
+          obs: '',
+          createdAt: new Date().toISOString(),
+        };
+        data.contractMovements.push(movement);
+        return movement;
+      });
+      save(data);
+      return created;
+    },
+    async applyPendingToContractGroup({ clientId, sourceTipo, targetTipo }) {
       const data = load();
       const src = sourceTipo || null;
       const matching = data.pending.filter((p) => p.clientId === clientId && (p.tipo || null) === src);
       const valor = Math.round(matching.reduce((s, p) => s + p.brl, 0) * 100) / 100;
       if (!(valor > 0)) return null;
-      const movement = {
-        id: crypto.randomUUID(),
-        contractId,
-        kind: 'brl',
-        valor,
-        obs: '',
-        createdAt: new Date().toISOString(),
-      };
-      data.contractMovements.push(movement);
+      const cList = data.contracts
+        .filter((c) => c.clientId === clientId && c.tipo === targetTipo)
+        .sort((a, b) => (a.date + a.createdAt).localeCompare(b.date + b.createdAt));
+      if (!cList.length) return null;
+      const movedByContract = {};
+      data.contractMovements.forEach((m) => {
+        if (!cList.some((c) => c.id === m.contractId)) return;
+        movedByContract[m.contractId] = movedByContract[m.contractId] || { usd: 0, brl: 0 };
+        movedByContract[m.contractId][m.kind] += m.valor;
+      });
+      const allocations = allocateAcrossContracts(cList, movedByContract, 'brl', valor);
+      const created = allocations.map((a) => {
+        const movement = {
+          id: crypto.randomUUID(),
+          contractId: a.contractId,
+          kind: 'brl',
+          valor: a.valor,
+          obs: '',
+          createdAt: new Date().toISOString(),
+        };
+        data.contractMovements.push(movement);
+        return movement;
+      });
       data.pending = data.pending.filter((p) => !(p.clientId === clientId && (p.tipo || null) === src));
       save(data);
-      return movement;
+      return created;
     },
   };
 }

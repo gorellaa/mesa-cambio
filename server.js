@@ -150,25 +150,33 @@ app.post('/api/pending', async (req, res) => {
     return res.status(400).json({ error: 'invalid pending entry' });
   }
 
-  // Se o cliente tem exatamente um contrato aberto (com saldo em reais),
-  // o valor confirmado ja desconta direto desse contrato, sem passar pela
-  // etapa de "a classificar" — é o caminho simples do dia a dia.
+  // Se o cliente tem contratos abertos de exatamente um tipo (Compra ou
+  // Venda — podendo ser varios fechamentos em taxas diferentes), o valor
+  // confirmado ja desconta direto desse grupo, sem passar pela etapa de
+  // "a classificar" — é o caminho simples do dia a dia. Com fechamentos
+  // abertos de tipos diferentes ao mesmo tempo (raro), a ambiguidade de
+  // pra qual lado aplicar faz cair no fluxo manual de "a classificar".
   const contracts = await db.listContracts();
-  const openContracts = contracts.filter((c) => {
-    if (c.clientId !== clientId) return false;
-    const brlMoved = c.movements
-      .filter((m) => m.kind === 'brl')
-      .reduce((s, m) => s + m.valor, 0);
-    const saldoBrl = Math.round((brlMoved - c.totalBrl) * 100) / 100;
-    return Math.abs(saldoBrl) > 0.005;
-  });
-  if (openContracts.length === 1) {
-    const movement = await db.addContractMovement(openContracts[0].id, {
+  const openTipos = [...new Set(
+    contracts
+      .filter((c) => {
+        if (c.clientId !== clientId) return false;
+        const brlMoved = c.movements
+          .filter((m) => m.kind === 'brl')
+          .reduce((s, m) => s + m.valor, 0);
+        const saldoBrl = Math.round((brlMoved - c.totalBrl) * 100) / 100;
+        return Math.abs(saldoBrl) > 0.005;
+      })
+      .map((c) => c.tipo)
+  )];
+  if (openTipos.length === 1) {
+    const movements = await db.addAggregateMovement({
+      clientId,
+      tipo: openTipos[0],
       kind: 'brl',
       valor: brlNum,
-      obs: (obs || '').slice(0, 500),
     });
-    return res.json({ appliedToContractId: openContracts[0].id, movement });
+    return res.json({ appliedToContracts: true, movements });
   }
 
   const entry = await db.addPending({
@@ -216,21 +224,21 @@ app.post('/api/pending/close', async (req, res) => {
 
 app.post('/api/pending/apply-to-contract', async (req, res) => {
   await db.ready;
-  const { clientId, sourceTipo, contractId } = req.body;
+  const { clientId, sourceTipo, targetTipo } = req.body;
   if (
     !clientId ||
-    !contractId ||
+    (targetTipo !== 'Compra' && targetTipo !== 'Venda') ||
     (sourceTipo != null && sourceTipo !== 'Compra' && sourceTipo !== 'Venda')
   ) {
     return res.status(400).json({ error: 'invalid apply request' });
   }
-  const movement = await db.applyPendingToContract({
+  const movements = await db.applyPendingToContractGroup({
     clientId,
     sourceTipo: sourceTipo || null,
-    contractId,
+    targetTipo,
   });
-  if (!movement) return res.status(400).json({ error: 'no pending amount for this client/tipo' });
-  res.json(movement);
+  if (!movements) return res.status(400).json({ error: 'no pending amount for this client/tipo' });
+  res.json(movements);
 });
 
 app.get('/api/daily-cost', async (req, res) => {
@@ -287,19 +295,25 @@ app.delete('/api/contracts/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/contracts/:id/movements', async (req, res) => {
+app.post('/api/clients/:clientId/contract-movements', async (req, res) => {
   await db.ready;
-  const { kind, valor, obs } = req.body;
+  const { tipo, kind, valor } = req.body;
   const valorNum = Number(valor);
-  if ((kind !== 'usd' && kind !== 'brl') || !(valorNum > 0)) {
+  if (
+    (tipo !== 'Compra' && tipo !== 'Venda') ||
+    (kind !== 'usd' && kind !== 'brl') ||
+    !(valorNum > 0)
+  ) {
     return res.status(400).json({ error: 'invalid movement' });
   }
-  const movement = await db.addContractMovement(req.params.id, {
+  const movements = await db.addAggregateMovement({
+    clientId: req.params.clientId,
+    tipo,
     kind,
     valor: valorNum,
-    obs: (obs || '').slice(0, 500),
   });
-  res.json(movement);
+  if (!movements.length) return res.status(400).json({ error: 'no contract for this client/tipo' });
+  res.json(movements);
 });
 
 app.delete('/api/contract-movements/:id', async (req, res) => {
