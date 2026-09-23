@@ -309,6 +309,11 @@
   @media (max-width:640px){ .submit-btn{ grid-column:span 2; } }
   .submit-btn:hover{ opacity:.92; }
   .submit-btn:disabled{ opacity:.6; cursor:default; }
+  .tx-toggle{
+    border:none; background:none; color:var(--muted); font-size:12px;
+    font-weight:600; padding:6px 0; margin-bottom:8px; cursor:pointer; text-decoration:underline;
+  }
+  .tx-toggle:hover{ color:var(--ink); }
 
   .contracts-section{ margin-bottom:20px; }
   .contracts-section .cs-title{ font-size:13px; font-weight:700; margin-bottom:2px; }
@@ -1059,6 +1064,10 @@
     // contratos que ainda tem reais a receber (falta abater) — sao os que
     // aparecem como opcao pra "aplicar" um valor pendente confirmado
     var openBrlContracts = clientContracts.filter(function(c){ return !c.quitado && Math.abs(c.saldoBrl) > 0.005; });
+    // com exatamente 1 contrato aberto, tudo que chega ja cai direto nele
+    // (ver /api/pending no server) — entao esconde as outras formas de
+    // lancar valor pra nao poluir a tela com opcoes que nao fazem nada novo
+    var hasOneOpenContract = openBrlContracts.length === 1;
     var contractCardsHtml = clientContracts.map(function(c){
       var saldoUsd = c.saldoUsd, saldoBrl = c.saldoBrl, quitado = c.quitado;
       var usdLabel = c.tipo === 'Compra' ? 'Saldo USDT (falta enviar)' : 'Saldo USDT (falta receber)';
@@ -1188,9 +1197,10 @@
 
       contractsBoxHtml +
 
-      pendingBoxHtml +
+      (hasOneOpenContract ? '' : pendingBoxHtml) +
 
-      '<form class="tx-form" id="txForm">' +
+      (hasOneOpenContract ? '<button type="button" class="tx-toggle" id="txToggleBtn">+ Lançamento avulso</button>' : '') +
+      '<form class="tx-form" id="txForm"' + (hasOneOpenContract ? ' hidden' : '') + '>' +
         '<div class="field"><label for="txDate">Data</label><input type="date" id="txDate" value="' + summaryDate + '" required></div>' +
         '<div class="field"><label>Tipo</label>' +
           '<div class="seg">' +
@@ -1246,6 +1256,15 @@
       renameForm.hidden = true;
       renameClient(client.id, newName);
     });
+
+    var txToggleBtn = host.querySelector('#txToggleBtn');
+    if(txToggleBtn){
+      txToggleBtn.addEventListener('click', function(){
+        var f = host.querySelector('#txForm');
+        f.hidden = !f.hidden;
+        txToggleBtn.textContent = (f.hidden ? '+' : '−') + ' Lançamento avulso';
+      });
+    }
 
     var formEl = host.querySelector('#txForm');
     var tipoState = 'Compra';
@@ -1341,21 +1360,23 @@
     });
 
     var pendingAddForm = host.querySelector('#pendingAddForm');
-    var pendingTipoState = 'Compra';
-    var pendingSegBtns = pendingAddForm.querySelectorAll('.seg button');
-    Array.prototype.forEach.call(pendingSegBtns, function(b){
-      b.addEventListener('click', function(){
-        pendingTipoState = b.getAttribute('data-tipo');
-        Array.prototype.forEach.call(pendingSegBtns, function(x){ x.classList.toggle('on', x===b); });
+    if(pendingAddForm){
+      var pendingTipoState = 'Compra';
+      var pendingSegBtns = pendingAddForm.querySelectorAll('.seg button');
+      Array.prototype.forEach.call(pendingSegBtns, function(b){
+        b.addEventListener('click', function(){
+          pendingTipoState = b.getAttribute('data-tipo');
+          Array.prototype.forEach.call(pendingSegBtns, function(x){ x.classList.toggle('on', x===b); });
+        });
       });
-    });
-    pendingAddForm.addEventListener('submit', function(ev){
-      ev.preventDefault();
-      var brlEl = pendingAddForm.querySelector('#pendingBrl');
-      var brl = parseFloat(brlEl.value);
-      if(!(brl > 0)) return;
-      addPending(client.id, client.name, pendingTipoState, brl, '');
-    });
+      pendingAddForm.addEventListener('submit', function(ev){
+        ev.preventDefault();
+        var brlEl = pendingAddForm.querySelector('#pendingBrl');
+        var brl = parseFloat(brlEl.value);
+        if(!(brl > 0)) return;
+        addPending(client.id, client.name, pendingTipoState, brl, '');
+      });
+    }
 
     Array.prototype.forEach.call(host.querySelectorAll('[data-pdel]'), function(btn){
       btn.addEventListener('click', function(){
