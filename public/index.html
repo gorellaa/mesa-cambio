@@ -801,7 +801,12 @@
     return api('/pending', {
       method:'POST',
       body: JSON.stringify({clientId:clientId, clientName:clientName, tipo:tipo, brl:brl, obs:obs})
-    }).then(loadAll).catch(function(){
+    }).then(function(result){
+      if(result && result.appliedToContractId){
+        showBanner(fmtBRL(brl) + ' aplicado direto no contrato aberto.', false);
+      }
+      return loadAll();
+    }).catch(function(){
       showBanner('Não foi possível adicionar o valor pendente.', true);
     });
   }
@@ -1153,7 +1158,11 @@
     var pendingBoxHtml =
       '<div class="pending-box">' +
         '<div class="pb-title">Valores pendentes</div>' +
-        '<div class="pb-help">Some os valores conforme o cliente for mandando ao longo do dia. No final, feche com a taxa combinada.</div>' +
+        '<div class="pb-help">' + (
+          openBrlContracts.length === 1
+            ? 'Tem um contrato aberto: cada valor confirmado já desconta direto do saldo dele, sem precisar fechar nada aqui.'
+            : 'Some os valores conforme o cliente for mandando ao longo do dia. No final, feche com a taxa combinada.'
+        ) + '</div>' +
         '<form class="pending-add" id="pendingAddForm">' +
           '<div class="field"><label>Tipo</label><div class="seg"><button type="button" class="on compra" data-tipo="Compra">Compra</button><button type="button" class="venda" data-tipo="Venda">Venda</button></div></div>' +
           '<div class="field"><label>Valor BRL</label><input type="number" step="0.01" min="0" inputmode="decimal" id="pendingBrl" class="num" placeholder="0,00" required></div>' +

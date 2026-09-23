@@ -149,6 +149,28 @@ app.post('/api/pending', async (req, res) => {
   ) {
     return res.status(400).json({ error: 'invalid pending entry' });
   }
+
+  // Se o cliente tem exatamente um contrato aberto (com saldo em reais),
+  // o valor confirmado ja desconta direto desse contrato, sem passar pela
+  // etapa de "a classificar" — é o caminho simples do dia a dia.
+  const contracts = await db.listContracts();
+  const openContracts = contracts.filter((c) => {
+    if (c.clientId !== clientId) return false;
+    const brlMoved = c.movements
+      .filter((m) => m.kind === 'brl')
+      .reduce((s, m) => s + m.valor, 0);
+    const saldoBrl = Math.round((brlMoved - c.totalBrl) * 100) / 100;
+    return Math.abs(saldoBrl) > 0.005;
+  });
+  if (openContracts.length === 1) {
+    const movement = await db.addContractMovement(openContracts[0].id, {
+      kind: 'brl',
+      valor: brlNum,
+      obs: (obs || '').slice(0, 500),
+    });
+    return res.json({ appliedToContractId: openContracts[0].id, movement });
+  }
+
   const entry = await db.addPending({
     clientId,
     clientName,
