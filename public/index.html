@@ -577,6 +577,7 @@
     font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:var(--amber);
   }
   .gancia-total .gt-value{ font-size:28px; font-weight:700; }
+  .gancia-total .gt-usd{ font-size:18px; font-weight:600; opacity:.85; }
   .gancia-total .gt-value.lucro-pos{ color:#7fd3a0; }
   .gancia-total .gt-value.lucro-neg{ color:#f0a58e; }
   .gancia-total .gt-note{ font-size:12px; opacity:.7; margin-left:auto; }
@@ -1575,25 +1576,29 @@
       return;
     }
 
-    var totalUsd = 0, totalBrl = 0, totalLucro = 0, diasComCusto = 0, diasSemCusto = 0;
+    var totalUsd = 0, totalBrl = 0, totalLucro = 0, totalLucroUsd = 0, diasComCusto = 0, diasSemCusto = 0;
 
     var rowsHtml = dates.map(function(date){
       var d = byDate[date];
       var custo = costByDate[date];
       var rate = d.usd ? d.brl/d.usd : 0;
-      var lucroHtml;
+      var lucroHtml, lucroUsdHtml;
       if(!d.empty){
         totalUsd += d.usd;
         totalBrl += d.brl;
       }
       if(custo == null || d.empty){
         lucroHtml = '<span class="lucro-pend">—</span>';
+        lucroUsdHtml = lucroHtml;
         if(!d.empty) diasSemCusto++;
       } else {
         var lucro = Math.round((d.brl - d.usd*custo) * 100) / 100;
         totalLucro += lucro;
         diasComCusto++;
         lucroHtml = '<span class="' + (lucro >= 0 ? 'lucro-pos' : 'lucro-neg') + '">' + fmtBRL(lucro) + '</span>';
+        var lucroUsd = Math.round((lucro / rate) * 100) / 100;
+        totalLucroUsd += lucroUsd;
+        lucroUsdHtml = '<span class="' + (lucroUsd >= 0 ? 'lucro-pos' : 'lucro-neg') + '">' + fmtUSD(lucroUsd) + '</span>';
       }
       var dash = '<span class="lucro-pend">—</span>';
       var trashNote = d.trashed
@@ -1605,10 +1610,12 @@
         '<td class="num">' + (d.empty ? dash : fmtRate(rate)) + '</td>' +
         '<td><input type="number" step="0.0001" min="0" inputmode="decimal" class="num custo-input" data-date="' + date + '" placeholder="0,0000" value="' + (custo != null ? custo : '') + '"></td>' +
         '<td class="num">' + lucroHtml + '</td>' +
+        '<td class="num">' + lucroUsdHtml + '</td>' +
       '</tr>';
     }).join('');
 
     totalLucro = Math.round(totalLucro * 100) / 100;
+    totalLucroUsd = Math.round(totalLucroUsd * 100) / 100;
     var totalRate = totalUsd ? totalBrl/totalUsd : 0;
     var totalClass = totalLucro >= 0 ? 'lucro-pos' : 'lucro-neg';
     var semCustoNote = diasSemCusto
@@ -1618,11 +1625,11 @@
     host.innerHTML =
       '<div class="gancia-total">' +
         '<div class="gt-label">Ganância total</div>' +
-        '<div class="gt-value num ' + totalClass + '">' + fmtBRL(totalLucro) + '</div>' +
+        '<div class="gt-value num ' + totalClass + '">' + fmtBRL(totalLucro) + ' <span class="gt-usd">· ' + fmtUSD(totalLucroUsd) + '</span></div>' +
         '<div class="gt-note">' + semCustoNote + '</div>' +
       '</div>' +
       '<table class="gancia"><thead><tr>' +
-        '<th>Data</th><th>Total USD</th><th>Total BRL (receita)</th><th>Taxa média</th><th>Meu custo (R$)</th><th>Lucro</th>' +
+        '<th>Data</th><th>Total USD</th><th>Total BRL (receita)</th><th>Taxa média</th><th>Meu custo (R$)</th><th>Lucro (R$)</th><th>Lucro (US$)</th>' +
       '</tr></thead><tbody>' + rowsHtml + '</tbody>' +
       '<tfoot><tr>' +
         '<td>TOTAL</td>' +
@@ -1631,6 +1638,7 @@
         '<td class="num">' + fmtRate(totalRate) + '</td>' +
         '<td></td>' +
         '<td class="num"><span class="' + totalClass + '">' + fmtBRL(totalLucro) + '</span></td>' +
+        '<td class="num"><span class="' + (totalLucroUsd >= 0 ? 'lucro-pos' : 'lucro-neg') + '">' + fmtUSD(totalLucroUsd) + '</span></td>' +
       '</tr></tfoot></table>';
 
     Array.prototype.forEach.call(host.querySelectorAll('.custo-input'), function(input){
