@@ -122,6 +122,10 @@ if (DATABASE_URL) {
       obs TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS wa_kv (
+      name TEXT PRIMARY KEY,
+      data TEXT NOT NULL
+    )`);
     await pool.query(`CREATE TABLE IF NOT EXISTS contract_movements (
       id TEXT PRIMARY KEY,
       contract_id TEXT NOT NULL,
@@ -339,6 +343,19 @@ if (DATABASE_URL) {
     },
     async deleteContractMovement(id) {
       await pool.query('DELETE FROM contract_movements WHERE id = $1', [id]);
+    },
+    async kvGet(name) {
+      const r = await pool.query('SELECT data FROM wa_kv WHERE name = $1', [name]);
+      return r.rows[0] ? r.rows[0].data : null;
+    },
+    async kvSet(name, data) {
+      await pool.query(
+        'INSERT INTO wa_kv (name, data) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET data = $2',
+        [name, data]
+      );
+    },
+    async kvDel(name) {
+      await pool.query('DELETE FROM wa_kv WHERE name = $1', [name]);
     },
     async addAggregateMovement({ clientId, tipo, kind, valor }) {
       const client = await pool.connect();
@@ -623,6 +640,11 @@ if (DATABASE_URL) {
       save(data);
       return true;
     },
+    async kvGet() {
+      return null;
+    },
+    async kvSet() {},
+    async kvDel() {},
     async deleteContractMovement(id) {
       const data = load();
       data.contractMovements = data.contractMovements.filter((m) => m.id !== id);

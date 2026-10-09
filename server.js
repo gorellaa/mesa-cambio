@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('./db');
+const wa = require('./whatsapp');
 
 const app = express();
 
@@ -28,7 +29,7 @@ app.use((req, res, next) => {
   res.status(401).send('Autenticação necessária.');
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
@@ -322,6 +323,23 @@ app.delete('/api/contract-movements/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/wa/status', (req, res) => res.json(wa.status()));
+
+// Importa a sessao do WhatsApp (arquivos da pasta auth_info) e/ou a config
+// do bot (numero autorizado e mapa grupo -> cliente) e reinicia o bot.
+app.post('/api/wa/import', async (req, res) => {
+  await db.ready;
+  const { files, config } = req.body || {};
+  if (files && typeof files === 'object') {
+    for (const [name, data] of Object.entries(files)) {
+      if (typeof data === 'string') await db.kvSet(name, data);
+    }
+  }
+  if (config && typeof config === 'object') await wa.setConfig(config);
+  await wa.restart();
+  res.json(wa.status());
+});
+
 app.get(/^(?!\/api\/).*/, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -329,4 +347,7 @@ app.get(/^(?!\/api\/).*/, (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log('Mesa de Câmbio rodando na porta ' + PORT);
+  db.ready
+    .then(() => wa.start())
+    .catch((err) => console.error('[whatsapp] falha ao iniciar:', err.message));
 });
