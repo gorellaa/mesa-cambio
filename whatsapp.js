@@ -12,6 +12,11 @@ let baileys = null;
 let sock = null;
 let generation = 0;
 const state = { status: 'desativado', detail: '' };
+const events = [];
+function record(what, extra) {
+  events.push({ at: new Date().toISOString(), what, ...extra });
+  if (events.length > 40) events.shift();
+}
 
 function log(...args) {
   console.log('[whatsapp]', ...args);
@@ -157,11 +162,21 @@ async function postPending(body) {
 
 async function handleMessage(s, msg) {
   try {
-    if (!msg.message || msg.key.fromMe) return;
+    if (!msg.message) {
+      record('sem-conteudo', { jid: msg.key.remoteJid });
+      return;
+    }
     const remoteJid = msg.key.remoteJid || '';
+    const text = extractText(msg.message).trim();
+    record('recebida', {
+      grupo: remoteJid.endsWith('@g.us'),
+      deMim: !!msg.key.fromMe,
+      remetente: normalizeJid(msg.key.participant || remoteJid),
+      texto: text.slice(0, 30),
+    });
+    if (msg.key.fromMe) return;
     if (!remoteJid.endsWith('@g.us')) return;
 
-    const text = extractText(msg.message).trim();
     const match = text.match(CONFIRM_RE);
     if (!match) return;
 
@@ -173,7 +188,10 @@ async function handleMessage(s, msg) {
       ].filter(Boolean)
     );
     const senderJid = normalizeJid(msg.key.participant || '');
-    if (!authorized.has(senderJid)) return;
+    if (!authorized.has(senderJid)) {
+      record('remetente-nao-autorizado', { remetente: senderJid });
+      return;
+    }
 
     const valor = parseValorBR(match[1]);
     if (!(valor > 0)) {
@@ -184,6 +202,7 @@ async function handleMessage(s, msg) {
     const groupSubject = await getGroupSubject(s, remoteJid);
     const clientName = (config.groups || {})[groupSubject];
     if (!clientName) {
+      record('grupo-nao-mapeado', { grupo: groupSubject });
       log('grupo "' + groupSubject + '" nao esta mapeado — ignorando.');
       return;
     }
@@ -196,6 +215,7 @@ async function handleMessage(s, msg) {
     }
 
     await postPending({ clientId: client.id, clientName: client.name, brl: valor });
+    record('lancado', { cliente: client.name, valor });
     log('confirmado R$ ' + valor.toFixed(2) + ' para "' + client.name + '" (grupo "' + groupSubject + '")');
 
     try {
@@ -204,6 +224,7 @@ async function handleMessage(s, msg) {
       // reagir e so feedback visual
     }
   } catch (err) {
+    record('erro', { mensagem: err.message });
     console.error('[whatsapp] erro processando mensagem:', err.message);
   }
 }
@@ -272,6 +293,7 @@ async function connect() {
   });
 
   s.ev.on('messages.upsert', async ({ messages, type }) => {
+    record('upsert', { type, quantidade: messages.length });
     if (myGen !== generation || type !== 'notify') return;
     for (const msg of messages) {
       await handleMessage(s, msg);
@@ -317,4 +339,4 @@ async function restart() {
   await start();
 }
 
-module.exports = { start, restart, setConfig, status: () => ({ ...state }) };
+module.exports = { start, restart, setConfig, status: () => ({ ...state, eventos: events.slice(-20) }) };
